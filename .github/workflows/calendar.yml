@@ -36,7 +36,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --disable-pip-version-check .
-      - run: llmshift calendar --out site
+      - run: llmshift calendar --out site --goatcounter llmshift  # visits counted at llmshift.goatcounter.com, no cookies
       - id: pages
         env:
           GH_TOKEN: ${{ github.token }}
