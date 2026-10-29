@@ -1,0 +1,19 @@
+{
+  "name": "llmshift",
+  "displayName": "LLMShift",
+  "description": "Move a codebase off a retiring AI model (OpenAI, Anthropic, Gemini and more) and prove the replacement works on your real traffic first. Bundles the LLMShift MCP server and a migration skill.",
+  "author": {
+    "name": "Chukwu Nzubechi",
+    "url": "https://github.com/DeChuks-hub"
+  },
+  "homepage": "https://github.com/DeChuks-hub/llmshift",
+  "repository": "https://github.com/DeChuks-hub/llmshift",
+  "license": "MIT",
+  "keywords": ["llm", "model-migration", "model-deprecation", "evals", "openai", "anthropic", "gemini", "mcp"],
+  "mcpServers": {
+    "llmshift": {
+      "command": "uvx",
+      "args": ["llmshift", "mcp"]
+    }
+  }
+}

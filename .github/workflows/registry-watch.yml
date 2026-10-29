@@ -32,8 +32,8 @@ jobs:
       issues: write  # opens the issue for pages the update could not read
       actions: write  # starts the calendar workflow after a data update
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install --disable-pip-version-check -e ".[dev]"

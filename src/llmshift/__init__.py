@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__version__ = "0.1.4"
+__version__ = "0.1.7"
 
 # These submodules share names with the public functions below. Importing them first
 # means the functions defined afterwards win; otherwise the first `import

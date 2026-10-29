@@ -7,6 +7,7 @@ import json
 import pytest
 
 from conftest import write_jsonl
+from llmshift import cli
 from llmshift.checks import CheckContext, Sample, run_checks
 from llmshift.importers import openai_evals as oe
 
@@ -126,7 +127,7 @@ def test_multi_and_responses_sampling():
     assert params["response_format"]["type"] == "json_schema" and params["tools"][0]["function"]["name"] == "f"
 
 
-def test_import_from_api(server, monkeypatch):
+def serve_evals_api(server):
     evals = [dict(EVAL, id="eval_abc"), {**EVAL, "id": "eval_def", "name": "Second"}]
     server.route("GET", "/v1/evals?", lambda r: {"object": "list", "data": evals[:1], "has_more": True, "last_id": "eval_abc"} if "after=" not in r["path"] else {"object": "list", "data": evals[1:], "has_more": False})
     server.route("GET", "/v1/evals/eval_abc/runs/evalrun_1/output_items", lambda r: {"object": "list", "data": [output_item(i, it, it["correct_label"], True) for i, it in enumerate(ITEMS)], "has_more": False})
@@ -134,6 +135,10 @@ def test_import_from_api(server, monkeypatch):
     server.route("GET", "/v1/evals/eval_def/runs", lambda r: {"object": "list", "data": [{**TEMPLATE_RUN, "id": "evalrun_2", "eval_id": "eval_def"}], "has_more": False})
     server.route("GET", "/v1/evals/eval_def/runs/evalrun_2/output_items", lambda r: {"object": "list", "data": [], "has_more": False})
     server.route("GET", "/v1/files/file-123/content", lambda r: "\n".join(json.dumps({"item": it}) for it in ITEMS).encode())
+
+
+def test_import_from_api(server, monkeypatch):
+    serve_evals_api(server)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     client = oe.EvalsClient(base_url=server.url + "/v1")
     result = oe.import_from_api(all_evals=True, client=client)
@@ -144,6 +149,34 @@ def test_import_from_api(server, monkeypatch):
     assert any("o3-mini" in w and "retires" in w for w in warnings)
     with pytest.raises(ValueError):
         oe.import_from_api(client=client)
+
+
+def test_save_raw_keeps_every_api_response(server, monkeypatch, tmp_path, capsys):
+    # The tests are a translation; the grader definitions and data sources as OpenAI held them are the record
+    # to compare against later, and after 30 November the API is gone. So --save-raw keeps what was read.
+    serve_evals_api(server)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret")
+    monkeypatch.setenv("OPENAI_BASE_URL", server.url + "/v1")
+    monkeypatch.chdir(tmp_path)
+    argv = ["import", "openai-evals", "--api", "--all", "--split", "evals", "--no-verify", "--save-raw"]
+    assert cli.main(argv) == 0
+    [saved] = (tmp_path / "evals").glob("openai-evals-raw-*.json")
+    assert f"saved {len(server.requests)} API responses" in capsys.readouterr().out
+    text = saved.read_text(encoding="utf-8")
+    assert "sk-test-secret" not in text  # response bodies only, never the request headers
+    responses = json.loads(text)["responses"]
+    assert len(responses) == len(server.requests)  # every response the import read
+    assert responses[0]["body"]["data"][0]["testing_criteria"] == EVAL["testing_criteria"]  # the graders, as OpenAI held them
+    data_file = next(r for r in responses if r["path"] == "/files/file-123/content")
+    assert [json.loads(line) for line in data_file["text"].splitlines()] == [{"item": it} for it in ITEMS]
+
+    asked = len(server.requests)
+    assert cli.main(argv) == cli.EXIT_USAGE  # an archive is never replaced without --force...
+    assert len(server.requests) == asked  # ...and that is known before the API is called
+    assert "--save-raw FILE" in capsys.readouterr().err
+    assert cli.main(["import", "openai-evals", "--api", "--all", "--no-verify", "-o", "one.jsonl", "--save-raw", "keep/raw.json"]) == 0
+    assert len(json.loads((tmp_path / "keep" / "raw.json").read_text(encoding="utf-8"))["responses"]) == asked
+    assert cli.main(["import", "openai-evals", "eval.json", "--save-raw"]) == cli.EXIT_USAGE  # an exported file is the raw copy already
 
 
 def test_import_from_export_file(tmp_path):

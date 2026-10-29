@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmshift"
-version = "0.1.4"
+version = "0.1.7"
 description = "Switch AI models without breaking your product: find model calls, turn real usage into tests, compare models, fix prompts and watch for drift."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -53,7 +53,7 @@ packages = ["src/llmshift"]
 "THIRD_PARTY_NOTICES" = "llmshift/THIRD_PARTY_NOTICES"  # the licenses of the price list and the vendored PyYAML
 
 [tool.hatch.build.targets.sdist]
-include = ["src/llmshift", "tests", "examples", "scripts", "README.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES", "action.yml", "server.json", "pyproject.toml"]
+include = ["src/llmshift", "tests", "examples", "scripts", "README.md", "CHANGELOG.md", "SECURITY.md", "LICENSE", "THIRD_PARTY_NOTICES", "action.yml", "server.json", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

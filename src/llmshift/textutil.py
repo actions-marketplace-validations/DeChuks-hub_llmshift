@@ -206,6 +206,22 @@ def shorten(text: Any, limit: int = 120) -> str:
     return s if len(s) <= limit else s[: max(0, limit - 3)] + "..."
 
 
+def xml_escape(text: str) -> str:
+    """XML text content, as xml.sax.saxutils.escape writes it (llmshift writes XML and never
+    parses it, so it has no reason to import an XML parser package)."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def quoteattr(text: str) -> str:
+    """A quoted XML attribute value, as xml.sax.saxutils.quoteattr writes it."""
+    text = xml_escape(text).replace("\n", "&#10;").replace("\r", "&#13;").replace("\t", "&#9;")
+    if '"' not in text:
+        return f'"{text}"'
+    if "'" not in text:
+        return f"'{text}'"
+    return '"' + text.replace('"', "&quot;") + '"'
+
+
 PROJECT_URL = "https://github.com/DeChuks-hub/llmshift"
 
 

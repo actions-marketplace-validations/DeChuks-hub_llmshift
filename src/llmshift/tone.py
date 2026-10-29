@@ -12,10 +12,10 @@ import re
 
 from .textutil import words
 
-EMOJI_RE = re.compile(
-    "[\U0001F300-\U0001F5FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF\U0001F900-\U0001F9FF"
-    "\U0001FA70-\U0001FAFF☀-⛿✀-➿⭐⭕✅❌✨]"
-)
+# Emoji blocks by code point. Built from numbers, not written as one literal class: CodeQL
+# reads characters beyond U+FFFF as U+FFFD and then reports the ranges as overlapping.
+_EMOJI_BLOCKS = ((0x1F300, 0x1F5FF), (0x1F600, 0x1F64F), (0x1F680, 0x1F6FF), (0x1F900, 0x1F9FF), (0x1FA70, 0x1FAFF), (0x2600, 0x26FF), (0x2700, 0x27BF))
+EMOJI_RE = re.compile("[" + "".join(f"{chr(lo)}-{chr(hi)}" for lo, hi in _EMOJI_BLOCKS) + "\u2b50\u2b55]")
 # Typographic symbols in those blocks that structured answers use as bullets/marks.
 _NOT_EMOJI = set("✓✔✗✘★☆➔➜➡❖●•☑☒☐☛☞")
 

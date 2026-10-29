@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import html
 import json
 import re
 
@@ -290,6 +291,65 @@ def test_calendar_counts_visits_with_goatcounter_only_when_asked(home, tmp_path)
     assert 'data-goatcounter="https://stats.example.org/count"' in (hosted / "index.html").read_text(encoding="utf-8")
     for bad in ('x" onload="alert(1)', "http://stats.example.org/count", "https://stats.example.org/count?<b>", "a", "my_site"):
         assert cli.main(["calendar", "--out", str(tmp_path / "bad"), "--goatcounter", bad]) == 2
+    assert not (tmp_path / "bad").exists()  # refused before anything was written
+
+
+def test_calendar_writes_a_page_per_model_and_files_for_search_engines(home, tmp_path, capsys):
+    import xml.etree.ElementTree as ET
+
+    extra = tmp_path / "extra.json"
+    extra.write_text(json.dumps([
+        {"id": "Acme <beta> & co", "provider": "openai", "status": "deprecated", "retires": "2026-11-15",
+         "replacement": "acme-chat-3", "source": "https://example.com/deprecations#acme"},
+        {"id": "acme-beta-co", "provider": "openai", "status": "active"},
+    ]), encoding="utf-8")
+    site = tmp_path / "site"
+    assert cli.main(["calendar", "--out", str(site), "--registry", str(extra), "--base-url", "https://example.org/cal"]) == 0
+    assert "model pages" in capsys.readouterr().out
+    # One page per model, at an address that survives IDs that differ only in punctuation (IDs are lower-cased).
+    first = (site / "models/openai/acme-beta-co/index.html").read_text(encoding="utf-8")
+    second = (site / "models/openai/acme-beta-co-2/index.html").read_text(encoding="utf-8")
+    assert "<h1><code>acme &lt;beta&gt; &amp; co</code></h1>" in first and "<beta>" not in first
+    assert "<h1><code>acme-beta-co</code></h1>" in second and "has not announced a shutdown date" in second
+    assert '<link rel="canonical" href="https://example.org/cal/models/openai/acme-beta-co/">' in first
+    assert "uvx llmshift scan" in first and "llmshift compare --to acme-chat-3" in first
+    ld = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>', first, re.S).group(1))
+    assert ld["@type"] == "FAQPage" and ld["mainEntity"][1]["acceptedAnswer"]["text"] == "OpenAI names acme-chat-3 as the replacement."
+    index = (site / "index.html").read_text(encoding="utf-8")
+    assert '<a href="models/openai/acme-beta-co/"><code>acme &lt;beta&gt; &amp; co</code></a>' in index
+    assert '<link rel="canonical" href="https://example.org/cal/">' in index and '<a href="feed.xml">RSS</a>' in index
+    # A model that is gone shows the error people search for.
+    data = json.loads((site / "retirements.json").read_text(encoding="utf-8"))
+    gone = next(m for m in data["recent"] if m["provider"] in ("openai", "anthropic", "google") and not m["model"].startswith("/"))
+    page = (site / "models" / feed._slug(gone["provider"]) / feed._slug(gone["model"]) / "index.html").read_text(encoding="utf-8")
+    assert "The error you get now" in page and html.escape(gone["model"]) in page
+    assert '<a href="../../../models/' + feed._slug(gone["provider"]) + '/">' in page  # breadcrumb back to the provider page
+    pages = sorted(p.relative_to(site).parent.as_posix() for p in site.rglob("index.html"))
+    ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    locs = [loc.text for loc in ET.parse(site / "sitemap.xml").getroot().findall("s:url/s:loc", ns)]  # nosec B314  # llmshift's own output
+    assert len(locs) == len(pages) and all(loc.startswith("https://example.org/cal/") for loc in locs)
+    assert "https://example.org/cal/models/openai/acme-beta-co/" in locs
+    assert "Sitemap: https://example.org/cal/sitemap.xml" in (site / "robots.txt").read_text(encoding="utf-8")
+    items = ET.parse(site / "feed.xml").getroot().findall("channel/item")  # nosec B314  # llmshift's own output
+    acme = next(i for i in items if i.find("title").text.startswith("acme <beta> & co (OpenAI) retires on 2026-11-15"))
+    assert acme.find("link").text == "https://example.org/cal/models/openai/acme-beta-co/"
+    within_a_year = [m for m in data["upcoming"] if m["days_left"] <= 365]
+    assert len({i.find("guid").text for i in items}) == len(items) == len(within_a_year) + len(data["recent"])
+    llms = (site / "llms.txt").read_text(encoding="utf-8")
+    assert llms.startswith("# AI model retirement calendar\n") and "](https://example.org/cal/models/openai/)" in llms
+    assert "uvx llmshift scan" in llms
+
+
+def test_calendar_search_files_need_an_https_base_url(home, tmp_path, capsys):
+    plain = tmp_path / "plain"
+    assert cli.main(["calendar", "--out", str(plain)]) == 0
+    assert "--base-url" in capsys.readouterr().out
+    assert not any((plain / name).exists() for name in ("sitemap.xml", "robots.txt", "feed.xml"))
+    assert (plain / "models" / "openai" / "index.html").exists()
+    assert 'rel="canonical"' not in (plain / "models" / "index.html").read_text(encoding="utf-8")
+    assert "](models/openai/)" in (plain / "llms.txt").read_text(encoding="utf-8")
+    for bad in ("http://example.org/", 'https://example.org/"><script>', "javascript:alert(1)", "example.org", "https://exa mple.org/"):
+        assert cli.main(["calendar", "--out", str(tmp_path / "bad"), "--base-url", bad]) == 2
     assert not (tmp_path / "bad").exists()  # refused before anything was written
 
 

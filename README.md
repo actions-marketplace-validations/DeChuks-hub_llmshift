@@ -14,6 +14,8 @@ uvx llmshift scan        # or: pipx run llmshift scan
 
 <sub>A real run: <code>scan</code> on a sample repository, then <code>compare</code> replaying llmshift's demo traffic on Claude Haiku 5.5.</sub>
 
+Leaving the OpenAI Evals platform? It goes read-only on 31 October and its API shuts down on 30 November 2026. `llmshift import openai-evals --api --all` pulls every eval, its latest run and the graded outputs into tests you keep, and runs them on any model ([how](https://github.com/DeChuks-hub/llmshift#import-move-off-the-openai-evals-platform), or the [step-by-step guide](https://dev.to/enzii/your-openai-evals-freeze-on-saturday-heres-how-to-get-them-out-and-keep-testing-on-any-model-3hmb)).
+
 Then test the replacement on your real traffic before the shutdown date: `llmshift snapshot` turns your logs into tests and `llmshift compare --to <replacement>` shows what changes. `llmshift demo` walks through it with simulated models, no API key needed.
 
 Providers now retire models roughly every six months. When a model's behaviour changes, outputs can look fine and still be wrong, and nothing raises an error. LLMShift is built around the moment of switching models, from finding the calls to proving the new model works:
@@ -25,7 +27,7 @@ Providers now retire models roughly every six months. When a model's behaviour c
 | `llmshift digest` | One message (Slack, Teams, e-mail, ...) listing the models your repositories use that are retired or retire soon. |
 | **Turn real traffic into tests** | |
 | `llmshift snapshot` | Turns real usage logs, including multi-step agent runs, into a test set automatically. You write no tests. |
-| `llmshift import openai-evals` | Brings in OpenAI Evals tests. The Evals platform goes read-only on **31 Oct 2026** and its API shuts down on **30 Nov 2026**. |
+| `llmshift import openai-evals` | Pulls every eval, its latest run and the graded outputs out of the OpenAI Evals API (`--api --all`) into tests you keep. The Evals platform goes read-only on **31 Oct 2026** and its API shuts down on **30 Nov 2026**. |
 | **Choose the new model** | |
 | `llmshift compare` | Runs the tests on the new model and shows exactly what changed: broken formats, wrong facts, different tone, different tool calls. |
 | `llmshift pick` | Tries several cheaper models at once and recommends the cheapest one that still passes, with the monthly saving. |
@@ -389,20 +391,21 @@ When the test set changes, the next run becomes the new reference. Destinations:
 
 - `llmshift update` downloads the latest lifecycle data from this repository (`--prices` also refreshes model prices; `--check` only says whether newer data exists). The download is validated and kept in your user data folder (`LLMSHIFT_HOME` to move it), and is used only while it is newer than the data bundled with your version. `llmshift doctor` shows which data is in use.
 - `llmshift digest repo-a repo-b --alert slack` sends one message listing the models your repositories use that are retired or retire within 30 days (`--within DAYS`). `--dry-run` prints it without sending. A weekly example is in [`examples/workflows/llmshift-digest.yml`](https://github.com/DeChuks-hub/llmshift/blob/main/examples/workflows/llmshift-digest.yml).
-- `llmshift calendar --out site` builds a searchable retirement-calendar website and an iCalendar feed (`retirements.ics`) you can subscribe to, plus `retirements.json`. Add `--goatcounter <code>` to count visits with [GoatCounter](https://www.goatcounter.com), which sets no cookies. In this repository, the `calendar` workflow publishes it to GitHub Pages every day.
+- `llmshift calendar --out site` builds a searchable retirement-calendar website with a page for every model and provider (shutdown date, replacement, source, the error a retired model returns and how to move off it), an iCalendar feed (`retirements.ics`) you can subscribe to, `retirements.json`, and `llms.txt` for AI assistants. `--base-url https://you.github.io/repo/` adds canonical links, `sitemap.xml`, `robots.txt` and an RSS feed (`feed.xml`). Add `--goatcounter <code>` to count visits with [GoatCounter](https://www.goatcounter.com), which sets no cookies. In this repository, the `calendar` workflow publishes it to GitHub Pages every day.
 - The data updates itself: every day, `registry-watch` reads the deprecation tables of OpenAI, Anthropic, the Gemini API and Vertex AI, merges new shutdown dates, replacements and newly deprecated models (it never removes anything, and models that already retired keep their record), runs the tests and commits the result, which `llmshift update` then brings to you. Changes on the other source pages, or more than 40 at once, open an issue for a person to review.
 
 ## import: move off the OpenAI Evals platform
 
-OpenAI's hosted Evals become read-only on 2026-10-31, and the dashboard and API shut down on 2026-11-30. OpenAI provides no export feature, so the API is the way out:
+OpenAI's hosted Evals become read-only on 2026-10-31, and the dashboard and API shut down on 2026-11-30. The dashboard's exports do not cover every kind of eval, and a file of past results cannot be run again on its own, so the API is the complete way out:
 
 ```bash
 export OPENAI_API_KEY=...
-llmshift import openai-evals --api --all --split .llmshift/evals/
+llmshift import openai-evals --api --all --split .llmshift/evals/ --save-raw
 llmshift compare --tests .llmshift/evals/ --to openai:gpt-5.6-sol --judge openai:gpt-5.6-terra
 ```
 
 - For each eval, LLMShift reads the testing criteria, the latest run's data source, and the run's **output items**. Those hold the exact inputs sent and the outputs the model gave, which become recorded baselines.
+- `--save-raw` also keeps every API response exactly as read (the evals with their graders, every run with its data source and settings, the output items and the data files) in a dated file next to the tests, such as `.llmshift/evals/openai-evals-raw-2026-10-29.json`, or in the file you name. Commit it with the tests: after 30 November it is the only copy of what the original evals did, and the grader definitions are what you will compare against. It holds response bodies only, never your API key.
 - Graders map one-to-one:
   - `string_check` (eq/ne/like/ilike) → `equals` / `not_equals` / `contains`
   - `text_similarity` → `similarity`, with the same metric and threshold
@@ -420,21 +423,28 @@ llmshift compare --tests .llmshift/evals/ --to openai:gpt-5.6-sol --judge openai
 
 `llmshift mcp` runs a Model Context Protocol server, so an AI coding assistant can migrate a codebase itself, with LLMShift as the safety net: "move this repo off gpt-4o and prove nothing broke". It is listed in the [official MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.DeChuks-hub/llmshift`.
 
+Claude Code, as a [plugin](https://github.com/DeChuks-hub/llmshift/tree/main/plugins/llmshift) with the server and a `migrate-models` skill that walks Claude through scan, snapshot, compare, fix and upgrade:
+
 ```bash
-claude mcp add llmshift -- llmshift mcp          # Claude Code
+claude plugin marketplace add DeChuks-hub/llmshift
+claude plugin install llmshift@llmshift
 ```
+
+Or the server alone: `claude mcp add llmshift -- uvx llmshift mcp`.
 
 Cursor, in `.cursor/mcp.json`:
 
 ```json
-{"mcpServers": {"llmshift": {"command": "llmshift", "args": ["mcp"]}}}
+{"mcpServers": {"llmshift": {"command": "uvx", "args": ["llmshift", "mcp"]}}}
 ```
 
 VS Code, in `.vscode/mcp.json`:
 
 ```json
-{"servers": {"llmshift": {"type": "stdio", "command": "llmshift", "args": ["mcp"]}}}
+{"servers": {"llmshift": {"type": "stdio", "command": "uvx", "args": ["llmshift", "mcp"]}}}
 ```
+
+`uvx` (from [uv](https://docs.astral.sh/uv/)) runs the server without installing anything first; with LLMShift installed, use `"command": "llmshift", "args": ["mcp"]`.
 
 The tools are `llmshift_scan`, `llmshift_models`, `llmshift_snapshot`, `llmshift_compare`, `llmshift_fix`, `llmshift_pick`, `llmshift_safety`, `llmshift_check`, `llmshift_upgrade` and `llmshift_doctor`. They work in the project the assistant has open (pass `--cwd DIR` to pin another), read `llmshift.yaml` like the CLI, and use the same API keys. Each tool tells the client whether it calls models or writes files, so assistants can ask first: `llmshift_snapshot` writes the test file, and `llmshift_upgrade` edits code only when called with `apply`. `llmshift_fix` never edits code; it returns suggested prompts and where they live.
 
@@ -467,13 +477,29 @@ A model is written `provider:model`; well-known IDs work without a prefix.
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-`@v0` follows the newest 0.x release: it moves once PyPI has a release, and never to a pre-release. Pin `@v0.1.4` or a commit SHA for builds that must not change.
+`@v0` follows the newest 0.x release: it moves once PyPI has a release, and never to a pre-release. Pin `@v0.1.7` or a commit SHA for builds that must not change.
 
 Inputs: `command` (any LLMShift command), `args` (split like shell words: quote an argument that holds spaces; nothing is expanded), `python-version`, `version` (empty = install from the action's source), `working-directory`. Outputs: `pass-rate`, `retired`, `retiring`, `recommended` (from `pick`). Complete workflows are in [`examples/workflows/`](https://github.com/DeChuks-hub/llmshift/tree/main/examples/workflows): PR checks, a nightly watch, prompt checks on pull requests, weekly upgrade pull requests and a weekly retirement digest. Pull requests from forks and Dependabot get no secrets, so those workflows skip the comparison there with a notice.
 
+`llmshift scan --format sarif` writes SARIF: upload it with `github/codeql-action/upload-sarif` and retiring models show up as code scanning alerts, on the lines that call them.
+
+## pre-commit
+
+Stop a commit that calls a retired model, with [pre-commit](https://pre-commit.com):
+
+```yaml
+- repo: https://github.com/DeChuks-hub/llmshift
+  rev: v0.1.7
+  hooks:
+    - id: llmshift-scan            # retired models
+    # - id: llmshift-scan-retiring # also models that retire within 180 days
+```
+
+The hooks run when code or config files change, and scan the whole repository.
+
 ## Configuration
 
-Settings live in `llmshift.yaml` or under `[tool.llmshift]` in `pyproject.toml`; the nearest one in the current directory or a parent (up to the git root) is used. Relative paths in it are relative to the file, so commands work from any subdirectory. `${VAR}` and `${VAR:-default}` are read from the environment. Command-line flags win, and values of the wrong type are reported with the key's name. [`examples/llmshift.yaml`](https://github.com/DeChuks-hub/llmshift/blob/main/examples/llmshift.yaml) documents every key: default models, judge, repeats, thresholds, severities, scan options, snapshot limits and redaction, fix rounds, pick candidates and prices, watch thresholds and alerts, the digest, and custom providers.
+Settings live in `llmshift.yaml` or under `[tool.llmshift]` in `pyproject.toml`. The nearest one in the current directory or a parent is used, up to the git root or your home directory, but never one from a drive root or one that another user owns ([SECURITY.md](https://github.com/DeChuks-hub/llmshift/blob/main/SECURITY.md)). Relative paths in it are relative to the file, so commands work from any subdirectory. `${VAR}` and `${VAR:-default}` are read from the environment. Command-line flags win, and values of the wrong type are reported with the key's name. [`examples/llmshift.yaml`](https://github.com/DeChuks-hub/llmshift/blob/main/examples/llmshift.yaml) documents every key: default models, judge, repeats, thresholds, severities, scan options, snapshot limits and redaction, fix rounds, pick candidates and prices, watch thresholds and alerts, the digest, and custom providers.
 
 ## Exit codes
 
@@ -489,7 +515,8 @@ Settings live in `llmshift.yaml` or under `[tool.llmshift]` in `pyproject.toml`;
 - Prompts and outputs are sent only to the providers you name. The cache and reports stay on disk, and `init` adds them to `.gitignore`. `llmshift cache clear` deletes the cached responses (they hold your prompts and the answers).
 - `snapshot`, `record` and shadow mode redact secrets by default. PII redaction is available with `--redact-pii`.
 - `safety` uses only synthetic personal data in its probes.
-- Imported Python graders execute code, so they only run with `--allow-python`, in a separate process.
+- Imported Python graders execute code, so they only run with `--allow-python`, in a separate process. `command` providers never run through a shell.
+- Every push and every release is scanned (Bandit, pip-audit, CodeQL and llmshift's own security tests). [SECURITY.md](https://github.com/DeChuks-hub/llmshift/blob/main/SECURITY.md) says how to report a vulnerability privately.
 - Reports escape all model output (HTML-safe).
 - Hostile input is tested: YAML alias bombs, gzip bombs, huge or corrupt logs, broken Unicode and oversized provider responses produce clear errors, or are skipped and counted, instead of hanging or crashing.
 

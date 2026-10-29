@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import json
 import os
@@ -54,11 +55,9 @@ def _step_summary(markdown: str) -> None:
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
         return
-    try:
+    with contextlib.suppress(OSError):
         with open(path, "a", encoding="utf-8", errors="replace") as fh:
             fh.write(markdown + "\n")
-    except OSError:
-        pass
 
 
 def _github_output(name: str, value: Any) -> None:
@@ -66,7 +65,7 @@ def _github_output(name: str, value: Any) -> None:
     if not path:
         return
     text = str(value)
-    try:
+    with contextlib.suppress(OSError):
         with open(path, "a", encoding="utf-8", errors="replace") as fh:
             if "\n" in text or "\r" in text:  # a line break would start another output: the multi-line form
                 import secrets
@@ -75,8 +74,6 @@ def _github_output(name: str, value: Any) -> None:
                 fh.write(f"{name}<<{delimiter}\n{text}\n{delimiter}\n")
             else:
                 fh.write(f"{name}={text}\n")
-    except OSError:
-        pass
 
 
 def _cache(cfg: dict, args: argparse.Namespace) -> Any:
@@ -174,10 +171,22 @@ def _load_compare_json(path: str) -> Any:
         raise UsageError(f"{path}: unexpected compare result ({exc})") from None
 
 
-def _refuse_overwrite(paths: list, force: bool) -> None:
+def _refuse_overwrite(paths: list, force: bool, elsewhere: str = "-o") -> None:
     existing = [str(x) for x in paths if Path(x).exists()]
     if existing and not force:
-        raise UsageError(f"{', '.join(existing[:3])} already exist{'s' if len(existing) == 1 else ''}; pass --force to replace, or -o to write elsewhere")
+        raise UsageError(f"{', '.join(existing[:3])} already exist{'s' if len(existing) == 1 else ''}; pass --force to replace, or {elsewhere} to write elsewhere")
+
+
+def _raw_archive_path(args: argparse.Namespace, cfg: dict) -> Path:
+    """Where `import --save-raw` keeps the API responses: the file given, else a dated file beside the tests."""
+    if args.save_raw:
+        return Path(args.save_raw)
+    if args.split:
+        folder = Path(args.split)
+    else:
+        out = Path(args.output or cfg.get("tests") or ".llmshift/tests.jsonl")
+        folder = out if out.is_dir() else out.parent
+    return folder / f"openai-evals-raw-{_dt.date.today().isoformat()}.json"
 
 
 def _positive(value: Any, what: str) -> int:
@@ -410,15 +419,13 @@ def cmd_init(args: argparse.Namespace, cfg: dict) -> int:
             _write(wf, text)
             con.out(f"{con.style(con.sym('pass'), 'green')} wrote {_rel(wf)}")
     gi = Path(".gitignore")
-    try:
+    with contextlib.suppress(OSError):
         # Bytes: the file may not be UTF-8, and its encoding must be left as it is.
         existing = gi.read_bytes() if gi.exists() else b""
         if b".llmshift/cache" not in existing:
             with gi.open("ab") as fh:
                 fh.write((b"\n" if existing and not existing.endswith(b"\n") else b"") + b"# llmshift\n.llmshift/cache/\n.llmshift/reports/\n")
             con.out(f"{con.style(con.sym('pass'), 'green')} added .llmshift/cache and .llmshift/reports to .gitignore")
-    except OSError:
-        pass
     con.out("")
     con.out("Next steps:")
     con.out("  1. llmshift scan                         # which models your code calls, and when they retire")
@@ -477,9 +484,21 @@ def cmd_scan(args: argparse.Namespace, cfg: dict) -> int:
     _github_output("retiring", counts["retiring_soon"])
     if fmt == "table" and not args.output:
         if counts["retired"] or counts["retiring_soon"]:
+            from .providers import infer_provider
+
+            # Name the replacement of the most urgent model when `compare --to` takes it as written
+            # (some replacements are an API or an SDK, a few need a provider: prefix).
+            replacement = next(
+                (m["lookup"].replacement for m in result.models()
+                 if m["lookup"] and m["lookup"].status in ("retired", "retiring") and m["lookup"].replacement
+                 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@-]*", m["lookup"].replacement)
+                 and infer_provider(m["lookup"].replacement)),
+                "<replacement>",
+            )
             con.out("")
             con.out(con.style("Next:", "bold") + " snapshot real traffic and check the replacement before the shutdown date:")
-            con.out("  llmshift snapshot <your-logs>  &&  llmshift compare --to <replacement>")
+            con.out(f"  llmshift snapshot <your-logs>  &&  llmshift compare --to {replacement}")
+            con.out(con.style("Then keep it checked on every pull request: llmshift init --github", "grey"))
     if should_fail(result, fail_on):
         if fmt == "table" and not args.output and not getattr(args, "in_demo", False):
             con.out(con.style(f"\nExit code 1: found models matching --fail-on {fail_on} (in CI this fails the job).", "red"), err=True)
@@ -900,13 +919,20 @@ def _watch_outage(model: str, exc: Exception, alerts: list, args: argparse.Names
 def cmd_import(args: argparse.Namespace, cfg: dict) -> int:
     from .importers import openai_evals as oe
     from .infer import infer_checks, merge_checks
-    from .testset import save_tests
+    from .testset import atomic_write, save_tests
 
     if args.source_kind != "openai-evals":
         raise UsageError(f"unknown import source {args.source_kind!r}")
-    if args.api or args.eval_id or args.all:
+    from_api = bool(args.api or args.eval_id or args.all)
+    raw_path = None
+    if args.save_raw is not None:
+        if not from_api:
+            raise UsageError("--save-raw works with --api (an exported file is already the raw copy)")
+        raw_path = _raw_archive_path(args, cfg)
+        _refuse_overwrite([raw_path], args.force, "--save-raw FILE")  # before any API call, not after the whole download
+    if from_api:
         con.out(con.style(f"Reading evals from the OpenAI API (the platform turns read-only on {oe.READ_ONLY_DATE} and shuts down on {oe.SHUTDOWN_DATE})...", "grey"), err=True)
-        result = oe.import_from_api(args.eval_id, all_evals=args.all, max_items=args.max_items, name_filter=args.eval, progress=lambda m: con.out(con.style(f"  {m}", "grey"), err=True))
+        result = oe.import_from_api(args.eval_id, all_evals=args.all, max_items=args.max_items, name_filter=args.eval, progress=lambda m: con.out(con.style(f"  {m}", "grey"), err=True), keep_raw=raw_path is not None)
     elif args.source:
         src = Path(args.source)
         if not src.exists():
@@ -917,6 +943,10 @@ def cmd_import(args: argparse.Namespace, cfg: dict) -> int:
             result = oe.import_from_export(args.source, data=args.data, max_items=args.max_items)
     else:
         raise UsageError("pass a source: --api (with --all or --eval-id), an exported eval JSON file, or an openai/evals registry directory")
+    if raw_path is not None:  # saved even when nothing converts: the graders and data sources are the record
+        archive = {"source": "OpenAI Evals API", "saved_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), "llmshift": __version__, "responses": result.raw}
+        atomic_write(raw_path, json.dumps(archive, indent=1, ensure_ascii=False) + "\n")
+        con.out(f"{con.style(con.sym('pass'), 'green')} saved {plural(len(result.raw), 'API response')} as read to {_rel(raw_path)}")
     if args.auto_checks:
         for case in result.cases:
             if case.has_baseline:
@@ -1247,13 +1277,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--all", action="store_true", help="with --api: import every eval in the project")
     p.add_argument("--eval-id", action="append", help="with --api: import this eval id (repeatable)")
     p.add_argument("--eval", action="append", help="only evals whose name matches this glob (repeatable)")
-    p.add_argument("--data", help="data file for an exported eval ({\"item\": ...} JSONL)")
+    p.add_argument("--data", help="data file for an exported eval, as {\"item\": ...} JSONL")
     p.add_argument("--max-items", type=positive_int, help="at most N items per eval")
     p.add_argument("--output", "-o", help="test file to write (default .llmshift/tests.jsonl)")
     p.add_argument("--split", help="write one test file per eval into this directory")
     p.add_argument("--auto-checks", action="store_true", help="also infer format/fact/tone checks from recorded outputs (as warnings)")
     p.add_argument("--allow-python", action="store_true", help="run python graders during the fidelity check")
     p.add_argument("--no-verify", action="store_true", help="skip re-grading recorded outputs to check fidelity")
+    p.add_argument("--save-raw", nargs="?", const="", metavar="FILE", help="with --api: also keep every API response as read, in a dated JSON file next to the tests (or FILE)")
     p.add_argument("--force", action="store_true", help="replace existing test files")
     p.set_defaults(func=cmd_import)
 
@@ -1278,10 +1309,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=["clear"])
     p.set_defaults(func=cmd_cache)
 
-    import importlib
+    from . import calibrate, embedmig, feed, mcp, pick, prcheck, safety, shadow, upgrade
 
+    modules = {"calibrate": calibrate, "pick": pick, "safety": safety, "shadow": shadow, "mcp": mcp, "prcheck": prcheck, "upgrade": upgrade, "embedmig": embedmig, "feed": feed}
     for name in EXTENSIONS:
-        importlib.import_module(f"{__package__}.{name}").register(sub)
+        modules[name].register(sub)
     return parser
 
 
@@ -1369,10 +1401,8 @@ def entry() -> None:
     if code == EXIT_INTERRUPTED:
         # Worker threads may still be blocked in network reads: exit without waiting for them.
         for stream in (sys.stdout, sys.stderr):
-            try:
+            with contextlib.suppress(Exception):
                 stream.flush()
-            except Exception:
-                pass
         os._exit(code)
     sys.exit(code)
 

@@ -7,17 +7,15 @@ import html
 import json
 import re
 from typing import Any
-from xml.sax.saxutils import escape as xml_escape
-from xml.sax.saxutils import quoteattr
 
 from . import __version__
 from .checks import CATEGORY_TITLES
 from .compare import CaseResult, CompareResult
 from .console import bar, status_label, style, sym, truncate, width
 from .formats import parse_json_lenient
-from .textutil import PROJECT_URL, credit, diff_ratio, md_inert, plural, show_bidi, word_diff
+from .textutil import PROJECT_URL, credit, diff_ratio, md_inert, plural, quoteattr, show_bidi, word_diff, xml_escape
 
-STATUS_ORDER = {"fail": 0, "error": 1, "warn": 2, "pass": 3}
+STATUS_ORDER = {"fail": 0, "error": 1, "warn": 2, "pass": 3}  # nosec B105  # a check status or setting name, not a password
 CATEGORY_ORDER = ["format", "facts", "tools", "safety", "semantics", "tone", "custom", "errors", "unchecked"]
 
 
@@ -472,7 +470,7 @@ def compare_html(result: CompareResult) -> str:
                     parts.append(f"<tr><td>{i + 1}</td><td>{e(old)}</td><td>{e(new)}</td></tr>")
                 parts.append("</table>")
             parts.append("<table><tr><th></th><th>Category</th><th>Check</th><th>Result</th></tr>")
-            for r in sorted(case.checks, key=lambda r: {"fail": 0, "error": 1, "skip": 3, "pass": 4}.get(r.status, 2)):
+            for r in sorted(case.checks, key=lambda r: {"fail": 0, "error": 1, "skip": 3, "pass": 4}.get(r.status, 2)):  # nosec B105  # a check status or setting name, not a password
                 cls = "fail" if (r.status == "fail" and r.severity == "error") else ("warn" if r.status in ("fail", "error") else r.status)
                 text = "changed" if cls == "warn" and r.status == "fail" else r.status
                 parts.append(f"<tr><td><span class=\"pill {_status(cls)}\">{e(text)}</span></td><td>{e(r.category)}</td><td><code>{e(r.type)}</code></td><td>{e(r.message)}</td></tr>")
@@ -515,7 +513,8 @@ def _scan_label(lk: Any, warn_days: int) -> tuple[str, tuple]:
 
 def scan_terminal(scan: Any, *, verbose: bool = False, max_locations: int = 4) -> str:
     models = scan.models()
-    lines = [style("LLMShift scan", "bold") + f"  {scan.files_scanned} files, {len(scan.findings)} model references, {len(models)} distinct models" + style(f"   (lifecycle data: {scan.registry_updated})", "grey")]
+    counted = f"{plural(scan.files_scanned, 'file')}, {plural(len(scan.findings), 'model reference')}, {plural(len(models), 'distinct model')}"
+    lines = [style("LLMShift scan", "bold") + f"  {counted}" + style(f"   (lifecycle data: {scan.registry_updated})", "grey")]
     if not models:
         lines.append("")
         lines.append("  No model IDs found. Try --include-docs, or check the paths you passed.")
@@ -575,7 +574,7 @@ def _skipped(scan: Any, shown: int = 5) -> list[str]:
 
 
 def scan_markdown(scan: Any) -> str:
-    lines = ["## LLMShift scan", "", f"{scan.files_scanned} files scanned, {len(scan.findings)} model references, lifecycle data from {scan.registry_updated}.", ""]
+    lines = ["## LLMShift scan", "", f"{plural(scan.files_scanned, 'file')} scanned, {plural(len(scan.findings), 'model reference')}, lifecycle data from {scan.registry_updated}.", ""]
     models = scan.models()
     skipped = ["- " + s.strip() for s in _skipped(scan)]
     if not models:

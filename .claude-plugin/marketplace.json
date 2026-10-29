@@ -1,0 +1,14 @@
+{
+  "name": "llmshift",
+  "description": "LLMShift: move off retiring AI models and prove the replacement works before you switch",
+  "owner": {
+    "name": "Chukwu Nzubechi"
+  },
+  "plugins": [
+    {
+      "name": "llmshift",
+      "source": "./plugins/llmshift",
+      "description": "Find the retiring AI models your code calls, turn real traffic into tests and check the replacement before the shutdown date."
+    }
+  ]
+}

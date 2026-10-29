@@ -14,6 +14,7 @@ against the real ones with the same checks as `compare`.
 from __future__ import annotations
 
 import atexit
+import contextlib
 import datetime as _dt
 import json
 import os
@@ -146,7 +147,7 @@ class Shadow:
         self.config = config
         self.max_pending = max(1, int(max_pending))
         self.stats = {"seen": 0, "sent": 0, "written": 0, "dropped": 0, "errors": 0}
-        self._rng = random.Random(seed)
+        self._rng = random.Random(seed)  # nosec B311  # seeded on purpose: the same sample on every run; nothing secret
         self._lock = threading.Lock()
         self._pending = 0
         self._pending_bytes = 0
@@ -294,10 +295,8 @@ class Shadow:
                 self.stats["errors"] += 1
         if exc is not None and not self._warned:
             self._warned = True
-            try:  # under -W error a warning would raise into the app (or end this worker)
+            with contextlib.suppress(Exception):  # under -W error a warning would raise into the app (or end this worker)
                 warnings.warn(f"llmshift shadow: {exc}", RuntimeWarning, stacklevel=2)
-            except Exception:
-                pass
 
     def flush(self, timeout: float = 30.0) -> bool:
         """Wait (up to `timeout` seconds) until the copies in flight are written."""

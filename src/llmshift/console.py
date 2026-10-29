@@ -30,7 +30,7 @@ _STYLES = {
 }
 
 _UNICODE_SYMBOLS = {
-    "pass": "✓",
+    "pass": "✓",  # nosec B105  # a check status or setting name, not a password
     "fail": "✗",
     "warn": "!",
     "info": "•",
@@ -42,7 +42,7 @@ _UNICODE_SYMBOLS = {
     "light": "░",
 }
 _ASCII_SYMBOLS = {
-    "pass": "OK",
+    "pass": "OK",  # nosec B105  # a check status or setting name, not a password
     "fail": "X",
     "warn": "!",
     "info": "*",
@@ -78,13 +78,11 @@ def _enable_windows_vt() -> bool:
 def setup_streams() -> None:
     """Make stdout/stderr safe for Unicode output on every platform."""
     for stream in (sys.stdout, sys.stderr):
-        try:
+        with contextlib.suppress(Exception):
             if stream.isatty():
                 stream.reconfigure(errors="replace")  # type: ignore[union-attr]
             else:
                 stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-        except Exception:
-            pass
     _state["color"] = None
     _state["unicode"] = None
 
@@ -227,22 +225,18 @@ def finish_output() -> None:
             stream.flush()
         except OSError as exc:
             if isinstance(exc, BrokenPipeError) or exc.errno in (errno.EPIPE, errno.EINVAL):
-                try:
+                with contextlib.suppress(Exception):
                     devnull = os.open(os.devnull, os.O_WRONLY)
                     os.dup2(devnull, stream.fileno())
-                except Exception:
-                    pass
-        except Exception:
+        except Exception:  # nosec B110  # exiting anyway: a stream that cannot flush has nowhere to report to
             pass
 
 
 def _closed_pipe(stream: Any) -> None:
     """The reader went away (`llmshift scan | head`): stop quietly, as Python's docs advise."""
-    try:
+    with contextlib.suppress(Exception):
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, stream.fileno())
-    except Exception:
-        pass
     raise SystemExit(1)
 
 
@@ -338,16 +332,12 @@ class Progress:
                 self._last = now
                 extra = f", {self.failed} error{'s' if self.failed != 1 else ''}" if self.failed else ""
                 msg = f"\r  {self.label}: {self.done}/{self.total}{extra}"
-                try:
+                with contextlib.suppress(Exception):
                     sys.stderr.write(msg)
                     sys.stderr.flush()
-                except Exception:
-                    pass
 
     def close(self) -> None:
         if self.enabled:
-            try:
+            with contextlib.suppress(Exception):
                 sys.stderr.write("\r" + " " * 70 + "\r")
                 sys.stderr.flush()
-            except Exception:
-                pass

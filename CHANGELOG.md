@@ -1,8 +1,53 @@
 # Changelog
 
-## Unreleased
+## 0.1.7 (2026-10-29)
+
+- `llmshift import openai-evals --api --save-raw` also keeps every API response exactly as read: the evals with their graders, every run with its data source and settings, the output items and the data files. They go to a dated file next to the tests (`openai-evals-raw-2026-10-29.json`), or to the file you name. Before, the import turned this data into tests and kept nothing else, so once the API shuts down on 30 November nothing would show what the original graders did. The file holds response bodies only, never the API key, and is never replaced without `--force`, which is checked before any API call. Suggested by Shuttlewright on DEV.
+
+## 0.1.6 (2026-10-28)
+
+- **Security:** the config search stays inside what is yours. Before, outside a git repository, the search went through every parent folder up to the drive root. A config that another user planted higher up, such as `C:\.llmshift\config.yaml` (which any user can create), could name programs that would then run as you. That is the hole git closed as CVE-2022-24765. Now the search:
+  - stops at the git root, at your home directory, and at the project an MCP server was started on;
+  - never reads a drive root or `/`;
+  - on Linux and macOS, ignores files another user owns and says so in the warnings;
+  - on Windows, outside your home directory, looks above the current folder only up to its git root.
+- `llmshift calendar` writes a page for every model and every provider: the shutdown date, the replacement, the official source, the error a retired model returns and the commands that move a codebase off it, linked from the calendar's table and to each other. It also writes `llms.txt`, so AI assistants can answer "when does this model retire?" from the site. `--base-url` (the site's https:// address) adds canonical links, `sitemap.xml`, `robots.txt` and an RSS feed (`feed.xml`) of the retirements in the next year; the `calendar` workflow passes it.
+- `scan` counts in words ("1 file, 1 model reference" instead of "1 files"), and its next step names the replacement of the most urgent model (`llmshift compare --to claude-sonnet-5-5`) and how to keep the check on every pull request (`llmshift init --github`).
+- A Claude Code plugin: `claude plugin marketplace add DeChuks-hub/llmshift`, then `claude plugin install llmshift@llmshift`, adds the MCP server (run with `uvx`, nothing to install first) and a `migrate-models` skill that walks Claude through scan, snapshot, compare, fix and upgrade.
+- pre-commit hooks: `llmshift-scan` stops a commit that calls a retired model, and `llmshift-scan-retiring` also one that calls a model retiring within 180 days.
+- The README sets up the MCP server with `uvx llmshift mcp`, so nothing has to be installed first, and says how to see retiring models as code scanning alerts (`scan --format sarif`).
+
+## 0.1.5 (2026-10-28)
 
 - `llmshift calendar --goatcounter <code>` counts visits to the calendar site with GoatCounter, which sets no cookies, and says so in the page footer. GoatCounter's script is pinned to one version (`count.v5.js`) with its integrity hash, so browsers refuse it if it ever changes.
+- Python graders now run as an ordinary module. Their source is written to a file in a temporary directory and imported by a separate Python process, so it is never handed to Python's `exec`. They are still off unless you pass `--allow-python` or set `allow_python_checks: true`. This answers an automated static-analysis advisory, GCVE-110-VULN-PYPI-2026-000499 (CWE-94). A test now fails if a call to `exec` or `eval` appears anywhere in llmshift's own source.
+- **Security:** on Windows, git and taskkill now start by their full path. Windows looks in the current directory before `PATH`, so a `git.exe` inside a cloned repository could have run in place of git when you scanned it. That is the untrusted search path GitPython fixed as CVE-2023-40590. Git is found in a `PATH` folder and never in the current one.
+- **Security:** the official OpenAI API is recognised by its host name. Before, any base URL containing `api.openai.com`, such as `api.openai.com.example.net`, got the official API's request shapes.
+- **Security:** recordings, histories and the other files that are appended to are created readable by their owner only (`0o600`), like the temporary files, because they hold prompts and answers.
+- **Changed:** a `command` provider never runs its command through a shell. A string command is split into words as a shell would split them (quotes group words), and nothing in it is expanded, piped or chained, so text in a config can no longer start a second program. On Windows the program splits the string itself. For shell features, name the shell yourself: `command: ["sh", "-c", "a | b"]`. An unclosed quote is a config error.
+- Code that security scanners report is gone:
+  - The subcommand modules and the OpenAI SDK's schema converters are loaded with ordinary `import` statements, not looked up from strings.
+  - `OLLAMA_HOST=0.0.0.0` is recognised with `ipaddress` instead of a hard-coded address.
+  - The scanner's `shell=` option is now `shell_script=`, since scanners take any `shell=` argument for a shell.
+- `tests/test_security.py` fails on code that scanners report:
+  - dynamic code execution;
+  - shells, pickle, or unsafe YAML;
+  - unverified connections;
+  - weak hashes used for security;
+  - hidden bidirectional text.
+- Bandit reports no issues at any severity on llmshift's code. Every safe-by-design case is marked `# nosec Bxxx` with its reason:
+  - errors that are ignored on purpose now use `contextlib.suppress`;
+  - retry jitter and recording sampling use the operating system's random source;
+  - the JUnit writer escapes XML itself instead of importing `xml.sax`;
+  - the maintenance scripts fetch only `https://` addresses.
+- A `security` workflow runs Bandit, `pip-audit` and those tests on every push, every pull request and every Monday. It runs Bandit at every severity on llmshift's code, and at medium and above on the tests, scripts and the vendored PyYAML. Releases wait for it before publishing.
+- CodeQL (the `security-extended` queries) scans the code and the workflows, and Dependabot proposes updates to actions and dependencies each week.
+- The PyPI publish action is pinned to a commit rather than a tag that could move.
+- The source archive includes `SECURITY.md`.
+- `SECURITY.md` covers:
+  - how to report a vulnerability privately;
+  - how each change is checked;
+  - which features run code you supply (python graders, `python:` and `command` providers) and how to keep them safe.
 
 ## 0.1.4 (2026-10-24)
 

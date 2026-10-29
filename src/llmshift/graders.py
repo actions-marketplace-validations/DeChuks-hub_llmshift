@@ -15,7 +15,7 @@ import operator
 import os
 import re
 import string
-import subprocess
+import subprocess  # nosec B404  # python graders run in a child Python process (see SECURITY.md)
 import sys
 import tempfile
 import threading
@@ -382,13 +382,17 @@ def c_modelgraded(check: dict, sample: Any, case: Any, ctx: Any) -> Any:
 
 # --------------------------------------------------------------------- python
 
+# The grader's source is written to a file and imported like any module, in a separate
+# Python process, so llmshift never hands it to Python's exec or eval.
+_GRADER_MODULE = "llmshift_grader"
 _RUNNER = r"""
-import json, math, sys
+import json, math, os, sys
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.getcwd())
 payload = json.loads(sys.stdin.read())
-ns = {"__name__": "__grader__"}
 try:
-    exec(compile(payload["source"], "<grader>", "exec"), ns)
-    grade = ns.get("grade")
+    import llmshift_grader
+    grade = getattr(llmshift_grader, "grade", None)
     if not callable(grade):
         raise ValueError("the source defines no grade(sample, item) function")
     value = float(grade(payload["sample"], payload["item"]))
@@ -408,11 +412,13 @@ def c_python(check: dict, sample: Any, case: Any, ctx: Any) -> Any:
         return SKIP("python grader not run: pass --allow-python (or set allow_python_checks: true) to execute grader code", reason="python_disabled")
     ns = sample.namespace()
     ns["output_audio"] = {}
-    payload = json.dumps({"source": check.get("source") or "", "sample": ns, "item": case.vars or {}}, ensure_ascii=False, default=str)
+    payload = json.dumps({"sample": ns, "item": case.vars or {}}, ensure_ascii=False, default=str)
     threshold = float(check.get("pass_threshold", 0.5))
     try:
         with tempfile.TemporaryDirectory(prefix="llmshift-grader-") as tmp:
-            proc = subprocess.run(
+            with open(os.path.join(tmp, _GRADER_MODULE + ".py"), "w", encoding="utf-8") as fh:
+                fh.write(check.get("source") or "")
+            proc = subprocess.run(  # nosec B603  # this Python, by full path, with a fixed runner; no shell
                 [sys.executable, "-c", _RUNNER],
                 input=payload,
                 capture_output=True,
@@ -443,7 +449,7 @@ _FUNCS = {"min": min, "max": max, "abs": abs, "floor": math.floor, "ceil": math.
 
 
 def safe_eval(expr: str, names: dict) -> float:
-    """Evaluate an arithmetic formula over grader scores without eval()."""
+    """Evaluate an arithmetic formula over grader scores without Python's eval."""
 
     def ev(node: ast.AST) -> float:
         if isinstance(node, ast.Expression):

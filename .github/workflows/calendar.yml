@@ -29,14 +29,15 @@ jobs:
     outputs:
       pages: ${{ steps.pages.outputs.enabled }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false  # nothing here pushes: the token is not left in .git/config
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install --disable-pip-version-check .
-      - run: llmshift calendar --out site --goatcounter llmshift  # visits counted at llmshift.goatcounter.com, no cookies
+      # --base-url: canonical links, sitemap.xml, robots.txt and feed.xml point at the published site.
+      - run: llmshift calendar --out site --goatcounter llmshift --base-url https://dechuks-hub.github.io/llmshift/  # visits counted at llmshift.goatcounter.com, no cookies
       - id: pages
         env:
           GH_TOKEN: ${{ github.token }}

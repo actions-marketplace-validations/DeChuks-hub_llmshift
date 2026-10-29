@@ -1077,7 +1077,7 @@ class _Sample:
 
     def __init__(self, limit: int | None, seed: int = 7):
         self.limit = limit
-        self.rng = random.Random(seed)
+        self.rng = random.Random(seed)  # nosec B311  # seeded on purpose: the same sample on every run; nothing secret
         self.groups: dict[str, list] = {}
         self.seen: Counter = Counter()
         self.heap: list = []  # (-kept, template), largest first; entries go stale as groups change

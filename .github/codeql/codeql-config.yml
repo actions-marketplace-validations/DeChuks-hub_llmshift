@@ -1,0 +1,10 @@
+name: llmshift
+# What CodeQL leaves out, and why:
+# - src/llmshift/_vendor: upstream PyYAML, copied unchanged (see THIRD_PARTY_NOTICES). Its
+#   findings belong upstream; llmshift reads YAML only through yamlsafe's SafeLoader.
+# - tests: the tests feed llmshift hostile input on purpose (a catastrophic regex for the
+#   timeout guard, fake keys and URLs), which CodeQL would report as the real thing.
+#   tests/test_security.py and Bandit still check the tests.
+paths-ignore:
+  - src/llmshift/_vendor
+  - tests

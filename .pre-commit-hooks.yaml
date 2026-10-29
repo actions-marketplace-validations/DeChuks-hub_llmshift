@@ -1,0 +1,24 @@
+# pre-commit hooks (https://pre-commit.com). In your .pre-commit-config.yaml:
+#
+#   - repo: https://github.com/DeChuks-hub/llmshift
+#     rev: v0.1.6  # the first release with this file
+#     hooks:
+#       - id: llmshift-scan
+#
+# The hook runs when code or config files change, and scans the whole repository.
+- id: llmshift-scan
+  name: LLMShift scan (retired AI models)
+  description: Stop a commit when the code calls an AI model its provider has retired.
+  entry: llmshift scan
+  args: [--fail-on, retired]
+  language: python
+  pass_filenames: false
+  files: '\.(py|pyi|ipynb|js|jsx|mjs|cjs|ts|tsx|go|java|kt|rb|php|cs|rs|ya?ml|json|toml|ini|cfg|env)$|(^|/)\.env[^/]*$'
+- id: llmshift-scan-retiring
+  name: LLMShift scan (AI models retiring soon)
+  description: Also stop a commit when the code calls a model that retires within 180 days.
+  entry: llmshift scan
+  args: [--fail-on, retiring]
+  language: python
+  pass_filenames: false
+  files: '\.(py|pyi|ipynb|js|jsx|mjs|cjs|ts|tsx|go|java|kt|rb|php|cs|rs|ya?ml|json|toml|ini|cfg|env)$|(^|/)\.env[^/]*$'

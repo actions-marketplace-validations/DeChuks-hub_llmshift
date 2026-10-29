@@ -51,7 +51,7 @@ class FakeAsyncCompletions:
 class FakeClient:
     def __init__(self, completions):
         self.chat = Obj(completions=completions)
-        self.api_key = "sk-should-not-leak-abcdefghijklmnopqrstuvwxyz"
+        self.api_key = "sk-" + "should-not-leak-abcdefghijklmnopqrstuvwxyz"
 
 
 def test_wrap_records_calls_and_snapshot_reads_them(tmp_path):
@@ -86,7 +86,7 @@ def test_async_wrap(tmp_path):
 
 def test_recorder_redacts_and_never_raises(tmp_path):
     rec = Recorder(tmp_path / "r.jsonl")
-    rec.log({"model": "m", "messages": [{"role": "user", "content": "key sk-proj-abcdefghijklmnopqrstuvwxyz0123"}]}, {"choices": []})
+    rec.log({"model": "m", "messages": [{"role": "user", "content": "key sk-" + "proj-abcdefghijklmnopqrstuvwxyz0123"}]}, {"choices": []})
     assert "sk-proj" not in (tmp_path / "r.jsonl").read_text(encoding="utf-8")
     blocked = tmp_path / "dir_not_file"
     blocked.mkdir()

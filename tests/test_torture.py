@@ -637,8 +637,8 @@ def test_a_folder_that_refuses_new_files_fails_at_once(tmp_path, monkeypatch):
 def test_redaction_knows_every_provider_key_and_real_world_numbers(monkeypatch):
     monkeypatch.setenv("MY_SERVICE_API_KEY", "0123456789abcdef0123456789abcdef")  # no recognisable shape
     keys = [
-        "xai-ABCDEFGHIJKLMNOPQRSTUV", "gsk_ABCDEFGHIJKLMNOPQRSTUV", "pplx-ABCDEFGHIJKLMNOPQRSTUV", "fw_ABCDEFGHIJKLMNOPQRSTUV",
-        "hf_ABCDEFGHIJKLMNOPQRSTUV", "r8_ABCDEFGHIJKLMNOPQRSTUV", "sk_live_ABCDEFGHIJKLMNOP", "ASIAABCDEFGHIJKLMNOP",
+        "xai-" + "ABCDEFGHIJKLMNOPQRSTUV", "gsk_" + "ABCDEFGHIJKLMNOPQRSTUV", "pplx-" + "ABCDEFGHIJKLMNOPQRSTUV", "fw_" + "ABCDEFGHIJKLMNOPQRSTUV",
+        "hf_" + "ABCDEFGHIJKLMNOPQRSTUV", "r8_" + "ABCDEFGHIJKLMNOPQRSTUV", "sk_live_" + "ABCDEFGHIJKLMNOP", "ASIA" + "ABCDEFGHIJKLMNOP",
         "AIza" + "SyA1234567890abcdefghijklmnopqrstu-", "0123456789abcdef0123456789abcdef",
     ]
     out = Redactor(secrets=True).text(" | ".join(keys))

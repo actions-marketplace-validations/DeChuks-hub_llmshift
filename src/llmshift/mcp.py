@@ -256,7 +256,7 @@ class Server:
 
         try:
             with self._workspace(arguments):
-                cfg = load_config(self.config_path)
+                cfg = load_config(self.config_path, stop=self.root)  # never a config from above the project
                 data = spec.handler(arguments, cfg)
         except RunAborted as exc:
             return self._result(f"every request failed: {exc}. Check the model name and that the provider's API key "
@@ -455,31 +455,25 @@ def _protocol_streams() -> tuple[Any, Any]:
     reader thread is waiting on hangs at startup."""
     reader = getattr(sys.stdin, "buffer", sys.stdin)
     writer = getattr(sys.stdout, "buffer", sys.stdout)
-    try:
+    with contextlib.suppress(AttributeError, OSError, ValueError):
         sys.stdout.flush()
         fd = os.dup(sys.stdout.fileno())
         os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
         writer = os.fdopen(fd, "wb")
-    except (AttributeError, OSError, ValueError):
-        pass
-    try:
+    with contextlib.suppress(AttributeError, OSError, ValueError):
         fd = os.dup(sys.stdin.fileno())
         null = os.open(os.devnull, os.O_RDONLY)
         os.dup2(null, sys.stdin.fileno())
         os.close(null)
         reader = os.fdopen(fd, "rb")
-    except (AttributeError, OSError, ValueError):
-        pass
     if os.name == "nt":
-        try:
+        with contextlib.suppress(Exception):  # child processes still get stdin=DEVNULL wherever llmshift starts them
             import ctypes
             import msvcrt
 
             set_std_handle = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint32, ctypes.c_void_p)(("SetStdHandle", ctypes.windll.kernel32))
             set_std_handle(-10 & 0xFFFFFFFF, msvcrt.get_osfhandle(sys.stdin.fileno()))  # STD_INPUT_HANDLE: the null device
             set_std_handle(-11 & 0xFFFFFFFF, msvcrt.get_osfhandle(sys.stderr.fileno()))  # STD_OUTPUT_HANDLE: stderr
-        except Exception:
-            pass  # child processes still get stdin=DEVNULL wherever llmshift starts them
     return reader, writer
 
 

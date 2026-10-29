@@ -33,8 +33,8 @@ import functools
 import inspect
 import json
 import os
-import random
 import reprlib
+import secrets
 import sys
 import threading
 import time
@@ -73,6 +73,7 @@ _CLIENT_FACTORIES = ("with_options", "copy")  # methods that return a configured
 
 _PATH_LOCKS: dict[str, threading.Lock] = {}
 _PATH_LOCKS_GUARD = threading.Lock()
+_SAMPLER = secrets.SystemRandom()  # which calls sample_rate records
 
 
 def _path_key(path: str | os.PathLike) -> str:
@@ -132,7 +133,7 @@ def _plain(obj: Any, depth: int, budget: list, path: set) -> Any:
             if callable(fn):
                 try:
                     data = _dump(fn) if method == "model_dump" else fn()
-                except Exception:
+                except Exception:  # nosec B112  # try the next way to read the object
                     continue
                 if isinstance(data, _PLAIN):  # a Mock's model_dump() returns another Mock
                     return _plain(data, depth + 1, budget, path)
@@ -183,7 +184,7 @@ class Recorder:
         _ALL_RECORDERS.add(self)
 
     def sampled(self) -> bool:
-        return self.sample_rate >= 1.0 or random.random() < self.sample_rate
+        return self.sample_rate >= 1.0 or _SAMPLER.random() < self.sample_rate
 
     def log(self, request: dict, response: Any = None, *, provider: str | None = None, api: str = "chat", latency_ms: float | None = None, error: str | None = None, metadata: dict | None = None) -> None:
         try:
@@ -226,10 +227,8 @@ class Recorder:
 def _warn(message: str) -> None:
     """A warning that can never break the app: under -W error (or pytest's
     filterwarnings = error) warnings.warn would raise into the app's own call."""
-    try:
+    with contextlib.suppress(Exception):
         warnings.warn(message, RuntimeWarning, stacklevel=3)
-    except Exception:
-        pass
 
 
 _recorders: dict[str, Recorder] = {}
@@ -304,10 +303,8 @@ class _StreamAccumulator:
         return self.final is not None or self.finish is not None
 
     def add(self, chunk: Any) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self._add(chunk)
-        except Exception:
-            pass
 
     def _usage(self, usage: Any) -> None:
         usage = to_dict(usage)
@@ -519,24 +516,35 @@ class _StreamProxy:
         return None
 
     def __del__(self) -> None:  # a stream abandoned part-way is still recorded, as incomplete
+        # A plain try, not contextlib.suppress: __del__ can run while the interpreter shuts
+        # down, after module globals such as contextlib are gone.
         try:
             self._finish("the stream was abandoned before its end")
-        except Exception:
+        except Exception:  # nosec B110  # a finalizer must never raise
             pass
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._stream, name)
 
 
-def _json_schema(cls: Any, converter: str | None = None) -> Any:
+def _openai_converter(api: str) -> Any:
+    """The OpenAI SDK's own conversion of a response-format class, when it is installed."""
+    try:
+        if api == "chat":
+            from openai.lib._parsing._completions import type_to_response_format_param as convert
+        else:
+            from openai.lib._parsing._responses import type_to_text_format_param as convert
+    except Exception:
+        return None
+    return convert
+
+
+def _json_schema(cls: Any, converter: Any = None) -> Any:
     """What the SDK sends for a pydantic class given as a response format: its own
     conversion when the SDK provides one, else the class's JSON schema."""
-    if converter:
-        module, _, name = converter.rpartition(".")
-        try:
-            return getattr(__import__(module, fromlist=[name]), name)(cls)
-        except Exception:
-            pass
+    if converter is not None:
+        with contextlib.suppress(Exception):
+            return converter(cls)
     try:
         return cls.model_json_schema()
     except Exception:
@@ -562,13 +570,13 @@ def _wire_formats(api: str, kwargs: dict) -> dict:
         return out
     name = getattr(cls, "__name__", "response")
     if api == "chat":
-        param = _json_schema(cls, "openai.lib._parsing._completions.type_to_response_format_param")
+        param = _json_schema(cls, _openai_converter("chat"))
         if isinstance(param, dict) and param.get("type") == "json_schema":
             out["response_format"] = param
         elif isinstance(param, dict):
             out["response_format"] = {"type": "json_schema", "json_schema": {"name": name, "schema": param, "strict": True}}
     elif api == "responses":
-        param = _json_schema(cls, "openai.lib._parsing._responses.type_to_text_format_param")
+        param = _json_schema(cls, _openai_converter("responses"))
         if isinstance(param, dict) and param.get("type") != "json_schema":
             param = {"type": "json_schema", "name": name, "schema": param, "strict": True}
         if isinstance(param, dict):
@@ -613,7 +621,7 @@ def _final_snapshot(stream: Any) -> Any:
     for read in readers:
         try:
             snapshot = read(stream)
-        except Exception:  # nothing received yet, or another SDK version
+        except Exception:  # nosec B112  # nothing received yet, or another SDK version
             continue
         if snapshot is not None:
             return snapshot
@@ -656,10 +664,8 @@ def _on_parse(response: Any, handle: Callable[[Any], Any], fail: Callable[[BaseE
             return later()
         return once(out)
 
-    try:
+    with contextlib.suppress(Exception):
         response.parse = parse
-    except Exception:
-        pass
     return response
 
 
@@ -706,7 +712,7 @@ class _HelperStream:
         self._start = time.perf_counter()
 
     def _record(self, exc: BaseException | None) -> None:
-        try:
+        with contextlib.suppress(Exception):  # recording never breaks the app
             latency = (time.perf_counter() - self._start) * 1000
             snapshot = _final_snapshot(self._stream) if self._stream is not None else None
             if snapshot is not None and _complete(snapshot):
@@ -715,8 +721,6 @@ class _HelperStream:
                 self._done(snapshot, _failure(exc), latency)
             elif snapshot is not None:
                 self._done(snapshot, "the stream block ended before the answer was complete", latency)
-        except Exception:
-            pass  # recording never breaks the app
 
     def __enter__(self) -> Any:
         self._start = time.perf_counter()
@@ -762,12 +766,10 @@ _IN_CALL: contextvars.ContextVar = contextvars.ContextVar("llmshift_in_call", de
 def _trail(fn: Any) -> list:
     """fn and the functions it wraps, as functools.wraps leaves them in __wrapped__."""
     out = []
-    try:
+    with contextlib.suppress(Exception):  # an odd object's __wrapped__ never breaks the app
         while fn is not None and len(out) < 32:
             out.append(fn)
             fn = getattr(fn, "__wrapped__", None)
-    except Exception:  # an odd object's __wrapped__ never breaks the app
-        pass
     return out
 
 
@@ -776,25 +778,21 @@ def _records(fn: Any, kind: str) -> bool:
     tracer's create around wrap()'s. That one records, after the tracer took out its own
     arguments (langsmith_extra)."""
     for f in _trail(fn):
-        try:
+        with contextlib.suppress(Exception):
             if getattr(f, "_llmshift_records", None) == kind:
                 return True
-        except Exception:
-            pass
     return False
 
 
 def _like(fn: Any, wrapper: Any, kind: str | None = None) -> Any:
     """`wrapper` with the name, signature and __wrapped__ of the SDK method fn, as
     instructor and tracers read them."""
-    try:
+    with contextlib.suppress(Exception):  # a callable update_wrapper cannot read: the wrapper works all the same
         functools.update_wrapper(wrapper, fn)
         if sys.version_info < (3, 10) and inspect.ismethod(fn):
             # 3.9's inspect.signature follows __wrapped__ past the method to its function,
             # and showed `self` as the first parameter.
             wrapper.__signature__ = inspect.signature(fn)
-    except Exception:  # a callable update_wrapper cannot read: the wrapper works all the same
-        pass
     wrapper.__dict__.pop("_llmshift_records", None)  # copied from a tracer's create around a recording one
     if kind:
         wrapper._llmshift_records = kind
@@ -896,10 +894,8 @@ class _Proxy:
                 if logging:
                     recorder.log(request, snapshot, provider=provider, api=api, latency_ms=latency_ms, error=error)
                 if shadow is not None and error is None:
-                    try:
+                    with contextlib.suppress(Exception):  # shadowing never breaks the app
                         shadow.observe(api, request, snapshot)
-                    except Exception:
-                        pass  # shadowing never breaks the app
 
             return _HelperStream(manager, done)
 
@@ -913,10 +909,8 @@ class _Proxy:
 
         def observe(kwargs: dict, response: Any) -> None:
             if shadow is not None:
-                try:
+                with contextlib.suppress(Exception):  # shadowing never breaks the app
                     shadow.observe(api, kwargs, response)
-                except Exception:
-                    pass  # shadowing never breaks the app
 
         def failed(kwargs: dict, start: float, exc: BaseException, logging: bool) -> None:
             if logging:

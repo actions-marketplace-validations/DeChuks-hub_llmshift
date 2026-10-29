@@ -20,14 +20,14 @@ import glob
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404  # `git ls-files` only, by full path, no shell
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
 from . import __version__
 from .registry import SEVERITY_ORDER, Lookup, Registry
-from .fileio import long_path
+from .fileio import find_program, long_path
 from .textutil import source_lines
 
 CODE_EXT = {
@@ -335,9 +335,12 @@ class ScanResult:
 
 
 def _git_files(root: Path) -> list[Path] | None:
+    exe = find_program("git")
+    if exe is None:
+        return None
     try:
-        proc = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        proc = subprocess.run(  # nosec B603  # git found by full path, arguments as a list, no shell
+            [exe, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             cwd=str(root),
             stdin=subprocess.DEVNULL,  # never the caller's stdin (in `llmshift mcp` that is the protocol pipe)
             capture_output=True,
@@ -495,13 +498,16 @@ def _read_text(path: Path) -> tuple[str | None, str | None]:
     return decode_text(data), None
 
 
+_AZURE_HOST_RE = re.compile(r"\bopenai\.azure\.com\b")
+
+
 def platform_hint(text: str) -> str | None:
     lower = text.lower()
     if "anthropicvertex" in lower or "vertexai" in lower or "aiplatform" in lower or "vertex_ai/" in lower:
         return "vertex"
     if "bedrock-runtime" in lower or "bedrockruntime" in lower or "bedrock_runtime" in lower or "anthropicbedrock" in lower:
         return "bedrock"
-    if "azureopenai" in lower or "openai.azure.com" in lower or "azure_endpoint" in lower:
+    if "azureopenai" in lower or "azure_endpoint" in lower or _AZURE_HOST_RE.search(lower):
         return "azure"
     return None
 
@@ -873,9 +879,9 @@ def strip_comment(line: str, markers: tuple[str, ...], state: dict) -> str:
 
 
 def scan_generic(
-    text: str, *, code: bool, shell: bool = False, llm_hint: bool | None = None, comments: tuple[str, ...] | None = None
+    text: str, *, code: bool, shell_script: bool = False, llm_hint: bool | None = None, comments: tuple[str, ...] | None = None
 ) -> list[tuple[int, int, str, str, str | None, str | None]]:
-    """Scan non-Python text line by line. `shell`: values may be unquoted (MODEL=gpt-4o)
+    """Scan non-Python text line by line. `shell_script`: values may be unquoted (MODEL=gpt-4o)
     and bare model IDs count (--model gpt-4o). `comments`: the file type's comment
     markers (see COMMENT_SYNTAX); text in comments is not scanned."""
     llm_hint = has_llm_hint(text) if llm_hint is None else llm_hint
@@ -922,7 +928,7 @@ def scan_generic(
             if strength is None:
                 continue
             model_ctx = True
-            if code and not quote and not shell:
+            if code and not quote and not shell_script:
                 continue
             if accepts_value(strength, val, llm_hint):
                 hits.setdefault(val, (m.start("val") + 1, "call" if code else "config"))
@@ -930,7 +936,7 @@ def scan_generic(
             val = m.group(2).strip()
             if looks_like_known_model(val) and (model_ctx or not is_label(val)):
                 hits.setdefault(val, (m.start(2) + 1, "call" if (code and model_ctx) else ("string" if code else "config")))
-        if (shell or not code) and triggered:
+        if (shell_script or not code) and triggered:
             for m in KNOWN_SEARCH_RE.finditer(line):
                 val = m.group(0).rstrip(".-:")  # the end of a sentence is not part of the id
                 if not _NOT_MODEL_SUFFIX_RE.search(val) and not is_label(val):
@@ -1046,8 +1052,8 @@ def scan_paths(
                 items = [i + (None, None) for i in scan_python(text)]
             else:
                 is_code = ext in CODE_EXT
-                shell = ext in (".sh", ".bash", ".zsh")
-                items = [i + (None, None) for i in scan_generic(text, code=is_code, shell=shell, comments=comment_syntax(path))]
+                shell_script = ext in (".sh", ".bash", ".zsh")
+                items = [i + (None, None) for i in scan_generic(text, code=is_code, shell_script=shell_script, comments=comment_syntax(path))]
         except RecursionError:
             result.errors.append(f"{rel}: too deeply nested to analyse")
             continue

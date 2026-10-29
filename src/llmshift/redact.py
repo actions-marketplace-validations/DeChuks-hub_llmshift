@@ -42,7 +42,7 @@ _BARE_VALUE = (
 )
 # An AWS secret access key: 40 characters, with upper and lower case letters and digits (a
 # SHA-1 is 40 lower-case hex digits).
-_AWS_SECRET = r"(?=[A-Za-z0-9/+]{0,39}[A-Z])(?=[A-Za-z0-9/+]{0,39}[a-z])(?=[A-Za-z0-9/+]{0,39}\d)[A-Za-z0-9/+]{40}"
+_AWS_SECRET = r"(?=[A-Za-z0-9/+]{0,39}[A-Z])(?=[A-Za-z0-9/+]{0,39}[a-z])(?=[A-Za-z0-9/+]{0,39}\d)[A-Za-z0-9/+]{40}"  # nosec B105  # a pattern that finds AWS secret keys in order to redact them
 
 # (pattern, what it must contain): a substring test is far cheaper than a regex that tries
 # every position of a long text (a document or an image in a request).

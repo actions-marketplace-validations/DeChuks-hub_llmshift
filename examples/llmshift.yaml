@@ -95,4 +95,4 @@ providers:                               # override presets or add OpenAI-compat
     api_key_env: LOCAL_API_KEY
   myapp:
     type: command                        # your own pipeline: request JSON on stdin, answer on stdout
-    command: python scripts/answer.py
+    command: python scripts/answer.py    # run without a shell; for pipes: ["sh", "-c", "a | b"]

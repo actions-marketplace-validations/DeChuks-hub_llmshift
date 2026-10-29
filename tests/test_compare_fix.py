@@ -109,7 +109,7 @@ def test_reports_render():
     assert page.startswith("<!doctype html>") and "<del>" in page and 'data-status="fail"' in page and "<script>" in page
     assert "<script>alert" not in page
     junit = report.compare_junit(res)
-    dom = xml.dom.minidom.parseString(junit.encode("utf-8"))
+    dom = xml.dom.minidom.parseString(junit.encode("utf-8"))  # nosec B318  # llmshift's own report, not untrusted XML
     assert dom.getElementsByTagName("testcase").length == len(res.cases)
     assert dom.getElementsByTagName("failure").length == res.summary["failed"]
 

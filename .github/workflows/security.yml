@@ -1,0 +1,36 @@
+name: security
+# The kind of scan that services watching PyPI run on every release, run here first: on every
+# push and pull request, every Monday (new rules and new advisories), and by release.yml
+# before anything is published. Any finding in llmshift's own code fails the run, and so
+# does a medium or high one anywhere else in the source archive.
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false  # nothing here pushes: the token is not left in .git/config
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check "bandit==1.9.4" "pip-audit==2.10.1" "pytest>=7"
+      - name: Bandit on llmshift's own code, every severity (each reviewed exception is marked `# nosec Bxxx` with its reason)
+        run: bandit -r src/llmshift --exclude src/llmshift/_vendor
+      - name: Bandit on everything else the source archive ships (tests use assert, by design)
+        run: bandit -r src/llmshift/_vendor tests scripts examples --skip B101 --severity-level medium
+      - name: Known vulnerabilities in llmshift's dependencies
+        run: pip-audit --strict .
+      - name: llmshift's own security rules (tests/test_security.py)
+        run: |
+          python -m pip install --disable-pip-version-check -e .
+          python -m pytest -q tests/test_security.py

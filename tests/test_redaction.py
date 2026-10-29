@@ -13,8 +13,8 @@ SYM = "xK9#mP2&vL5?qR8(wN3)"  # a generated password: & ? ( ) are part of it
 
 def test_hostile_text_takes_milliseconds_not_seconds():
     hostile = [
-        "-----BEGIN PRIVATE KEY-----\n" * 8000,  # 224 KB of BEGINs with no END held the GIL for 15 s
-        "-----BEGIN RSA PRIVATE KEY-----AAAA\n" * 6000,
+        ("-----BEGIN " + "PRIVATE KEY-----\n") * 8000,  # 224 KB of BEGINs with no END held the GIL for 15 s
+        ("-----BEGIN " + "RSA PRIVATE KEY-----AAAA\n") * 6000,
         ("x_" * 20 + "passwor") * 5000,  # a long name before the word, never finished
         "password=." * 20000,
         "pwd=a1!@#$%^&*()" * 15000,

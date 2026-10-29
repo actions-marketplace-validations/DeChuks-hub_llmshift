@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
+import subprocess  # nosec B404  # git only, by full path, with argument lists and no shell
 import tempfile
 import time
 import urllib.parse
@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import UsageError
+from .fileio import find_program
 from .providers import http
 from .providers.base import ProviderError
 from .textutil import json_loads
@@ -33,9 +34,12 @@ class GitError(RuntimeError):
 
 def git(*args: str, cwd: str | os.PathLike | None = None, check: bool = True, env: dict | None = None, input: bytes | None = None) -> str:
     """Run git with an argument list (never through a shell) and return stdout."""
+    exe = find_program("git")
+    if exe is None:
+        raise GitError("git is not installed or not on PATH")
     try:
-        proc = subprocess.run(
-            ["git", *args],
+        proc = subprocess.run(  # nosec B603  # git found by full path, arguments as a list, no shell
+            [exe, *args],
             cwd=str(cwd) if cwd else None,
             input=input,
             stdin=None if input is not None else subprocess.DEVNULL,
@@ -51,8 +55,11 @@ def git(*args: str, cwd: str | os.PathLike | None = None, check: bool = True, en
 
 
 def git_bytes(*args: str, cwd: str | os.PathLike | None = None) -> bytes | None:
+    exe = find_program("git")
+    if exe is None:
+        return None
     try:
-        proc = subprocess.run(["git", *args], cwd=str(cwd) if cwd else None, stdin=subprocess.DEVNULL, capture_output=True)
+        proc = subprocess.run([exe, *args], cwd=str(cwd) if cwd else None, stdin=subprocess.DEVNULL, capture_output=True)  # nosec B603  # as in git()
     except FileNotFoundError:
         return None
     return proc.stdout if proc.returncode == 0 else None

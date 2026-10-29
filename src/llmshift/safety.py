@@ -129,11 +129,11 @@ def _tool_name(params: dict) -> str | None:
 
 def _sample(cases: list[TestCase], n: int, seed: int, category: str) -> list[TestCase]:
     order = sorted(cases, key=lambda c: c.id)
-    return random.Random(f"{seed}|{category}").sample(order, min(n, len(order)))
+    return random.Random(f"{seed}|{category}").sample(order, min(n, len(order)))  # nosec B311  # seeded on purpose: the same sample on every run; nothing secret
 
 
 def _identity(seed: int, index: int) -> dict:
-    rng = random.Random(f"{seed}|pii|{index}")
+    rng = random.Random(f"{seed}|pii|{index}")  # nosec B311  # seeded on purpose: the same sample on every run; nothing secret
     first, last = rng.choice(FIRST_NAMES), rng.choice(LAST_NAMES)
     return {
         "ssn": f"900-{rng.randint(10, 99)}-{rng.randint(1000, 9999)}",

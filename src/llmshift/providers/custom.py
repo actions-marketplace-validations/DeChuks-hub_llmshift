@@ -14,6 +14,7 @@ Anthropic / Gemini response object.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import copy
 import hashlib
@@ -23,8 +24,9 @@ import inspect
 import json
 import os
 import re
+import shlex
 import signal
-import subprocess
+import subprocess  # nosec B404  # command providers run the program the user configured (see SECURITY.md)
 import sys
 import tempfile
 import threading
@@ -222,24 +224,19 @@ class PythonProvider(Provider):
 
 def _kill_tree(proc: subprocess.Popen) -> None:
     """Kill a command and everything it started (a shell's children would otherwise linger)."""
-    try:
+    with contextlib.suppress(Exception):
         if os.name == "nt":
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], stdin=subprocess.DEVNULL, capture_output=True, timeout=15)
+            taskkill = fileio.windows_tool("taskkill")
+            subprocess.run([taskkill, "/F", "/T", "/PID", str(proc.pid)], stdin=subprocess.DEVNULL, capture_output=True, timeout=15)  # nosec B603  # Windows' own taskkill, by full path
         else:
             os.killpg(proc.pid, signal.SIGKILL)
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         proc.kill()
-    except Exception:
-        pass
 
 
 def _reap(proc: subprocess.Popen) -> None:
-    try:
+    with contextlib.suppress(subprocess.TimeoutExpired, OSError, ValueError):  # a grandchild still holds the pipes; it has been sent a kill already
         proc.communicate(timeout=5)
-    except (subprocess.TimeoutExpired, OSError, ValueError):
-        pass  # a grandchild still holds the pipes; it has been sent a kill already
 
 
 def kill_running() -> None:
@@ -264,7 +261,20 @@ class CommandProvider(Provider):
             raise ProviderError(f"provider {self.name!r} has type 'command' but no 'command' setting", code="invalid_spec")
         if not isinstance(self.command, (str, list)) or (isinstance(self.command, list) and not all(isinstance(c, str) for c in self.command)):
             raise ProviderError(f"provider {self.name!r}: 'command' must be a string or a list of strings", code="invalid_spec")
+        try:
+            self.argv = self._argv()
+        except ValueError as exc:  # an unclosed quote
+            raise ProviderError(f"provider {self.name!r}: cannot split 'command' into words ({exc})", code="invalid_spec") from None
         self.env = option_mapping(self.options, "env", self.spec, text_values=True)
+
+    def _argv(self) -> list[str] | str:
+        # Never through a shell, so nothing in the command is expanded, piped or chained.
+        # A string is split into words as a shell would split them (quotes group words);
+        # Windows splits it itself when it starts the program. For shell features, name the
+        # shell yourself: ["sh", "-c", "..."] or ["cmd", "/c", "..."].
+        if isinstance(self.command, list):
+            return list(self.command)
+        return self.command if os.name == "nt" else shlex.split(self.command)
 
     def identity(self) -> dict:
         shaping = {k: v for k, v in self.options.items() if k not in ("timeout", "max_retries", "timeout_set")}
@@ -292,7 +302,7 @@ class CommandProvider(Provider):
         env = dict(os.environ)
         env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
         env.update(self.env)
-        # Its own process group on POSIX, so a timeout can kill a shell and its children.
+        # Its own process group on POSIX, so a timeout can kill the program and its children.
         kwargs: dict = {"start_new_session": True} if os.name != "nt" else {}
         # The request comes from a file, not a pipe: writing a pipe the program never reads
         # blocks, and on Windows before Python 3.13 that write ignored the timeout.
@@ -302,23 +312,20 @@ class CommandProvider(Provider):
 
         def drop_request_file() -> None:
             stdin_file.close()
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(stdin_path)  # the request (your prompts) is not left behind
-            except OSError:
-                pass
 
         try:
             stdin_file.write(payload.encode("utf-8"))
             stdin_file.seek(0)
-            proc = subprocess.Popen(
-                self.command,
+            proc = subprocess.Popen(  # nosec B603  # the user's configured program, as an argument list; never a shell
+                self.argv,
                 stdin=stdin_file,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                shell=isinstance(self.command, str),
                 cwd=self.options.get("cwd") or None,
                 env=env,
                 **kwargs,

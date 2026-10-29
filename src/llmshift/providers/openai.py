@@ -16,6 +16,7 @@ import json
 import os
 import re
 import threading
+import urllib.parse
 import uuid
 from typing import Any
 
@@ -106,7 +107,8 @@ class OpenAIProvider(Provider):
         key_env = o.get("api_key_env", "OPENAI_API_KEY")
         self.api_key = clean_key(o.get("api_key")) or clean_key(_env(key_env))
         self.key_env = key_env
-        self.official = "api.openai.com" in self.base_url
+        # By host name: a substring test would also accept api.openai.com.example.net.
+        self.official = (urllib.parse.urlsplit(self.base_url).hostname or "").lower() == "api.openai.com"
         self.requires_key = bool(o.get("requires_key", key_env is not None and not _is_local(self.base_url)))
         self.api = str(o.get("api", "auto"))
         self.extra_headers = option_mapping(o, "headers", self.spec, text_values=True)

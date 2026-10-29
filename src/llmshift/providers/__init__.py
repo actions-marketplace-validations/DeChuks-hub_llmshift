@@ -10,6 +10,7 @@ Spec forms:
 from __future__ import annotations
 
 import difflib
+import ipaddress
 import os
 import re
 from typing import Any
@@ -90,6 +91,13 @@ def _user_config(config: dict | None, *names: str) -> dict | None:
     return None
 
 
+def _unspecified(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_unspecified
+    except ValueError:  # a name, not an address
+        return False
+
+
 def ollama_url(value: str) -> str:
     """OLLAMA_HOST read the way Ollama reads it: "0.0.0.0", "localhost", ":11434",
     "box:8080", "https://ollama.example.com". Without a scheme the port defaults to 11434
@@ -112,7 +120,7 @@ def ollama_url(value: str) -> str:
         host, given = hostport, ""
     if re.fullmatch(r"[0-9]{1,5}", given) and int(given) <= 65535:
         port = given
-    if host in ("", "0.0.0.0", "::"):
+    if not host or _unspecified(host):  # a server's listen address: connect to this machine
         host = "127.0.0.1"
     if ":" in host:  # an IPv6 address
         host = f"[{host}]"

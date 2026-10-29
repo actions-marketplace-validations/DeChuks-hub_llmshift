@@ -29,7 +29,9 @@ def main() -> None:
     if len(sys.argv) > 1:
         table = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     else:
-        with urllib.request.urlopen(SOURCE, timeout=60) as resp:
+        if not SOURCE.startswith("https://"):
+            raise SystemExit(f"SOURCE must be an https:// address: {SOURCE}")
+        with urllib.request.urlopen(SOURCE, timeout=60) as resp:  # nosec B310  # https only, checked above
             table = json.loads(resp.read())
     if not isinstance(table, dict):
         raise SystemExit("the price table is not a JSON object; the source format may have changed")

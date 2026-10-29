@@ -3,6 +3,7 @@ errors that would repeat for every request (bad key, unknown model)."""
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any, Callable
@@ -156,10 +157,8 @@ def run_cases(
         with lock:
             state["ok"] += 1
         if key is not None:
-            try:
+            with contextlib.suppress(Exception):
                 cache.put(key, resp)
-            except Exception:
-                pass
         return case.id, resp
 
     pool = ThreadPoolExecutor(max_workers=max(1, int(concurrency)))

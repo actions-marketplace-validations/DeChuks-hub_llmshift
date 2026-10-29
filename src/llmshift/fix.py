@@ -109,7 +109,7 @@ def _score(cases: list[CaseResult]) -> float:
     for c in cases:
         if c.status == "error":
             continue  # a request that failed earns nothing (it has no checks to give it credit)
-        total += {"pass": 1.0, "warn": 0.6}.get(c.status, 0.0)
+        total += {"pass": 1.0, "warn": 0.6}.get(c.status, 0.0)  # nosec B105  # a check status or setting name, not a password
         values = []
         for r in c.checks:
             if r.status == "pass":

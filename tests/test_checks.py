@@ -239,6 +239,10 @@ def test_python_grader(make_case):
     assert broken.status == "fail" and "boom" in broken.message
     missing = ev({"type": "python", "source": "x = 1"}, "yes", case, ctx)
     assert missing.status == "fail" and "grade" in missing.message
+    typo = ev({"type": "python", "source": "def grade(s, i)\n    return 1.0\n"}, "yes", case, ctx)
+    assert typo.status == "fail" and "SyntaxError" in typo.message
+    helper = "import math\n\ndef _half(x):\n    return x / 2\n\ndef grade(s, i):\n    return _half(2.0) if math.pi else 0.0\n"
+    assert ev({"type": "python", "source": helper}, "yes", case, ctx).status == "pass"
 
 
 def test_multi_and_safe_eval(make_case):

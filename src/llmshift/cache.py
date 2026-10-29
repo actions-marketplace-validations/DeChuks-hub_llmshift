@@ -6,6 +6,7 @@ cache, because its whole point is to observe the live model.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import threading
@@ -69,22 +70,18 @@ class ResponseCache:
                 fh.write(text)
             os.replace(tmp, path)
             tmp = None
-        except Exception:
-            pass  # a cache write failure must never fail a run
+        except Exception:  # nosec B110  # a cache write failure must never fail a run
+            pass
         finally:
             if tmp is not None:
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp)
-                except OSError:
-                    pass
 
     def clear(self) -> int:
         removed = 0
         if self.dir.is_dir():
             for f in self.dir.rglob("*.json"):
-                try:
+                with contextlib.suppress(OSError):
                     f.unlink()
                     removed += 1
-                except OSError:
-                    pass
         return removed

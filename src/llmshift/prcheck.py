@@ -278,7 +278,7 @@ def _python_slots(text: str) -> dict[str, list[str]] | None:
         elif isinstance(node, ast.Call):
             try:
                 func = ast.unparse(node.func)  # type: ignore[attr-defined]
-            except Exception:
+            except Exception:  # nosec B112  # a call it cannot render is simply not a slot
                 continue
             for kw in node.keywords:
                 value = _render(kw.value) if kw.arg else None

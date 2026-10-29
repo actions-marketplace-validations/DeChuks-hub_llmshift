@@ -128,7 +128,7 @@ def test_streams_and_shadow_given_as_a_spec(tmp_path, monkeypatch):
 def test_secrets_are_redacted_in_the_shadow_log(tmp_path):
     shadow = Shadow("mock:legacy", rate=1.0, path=tmp_path / "s.jsonl")
     client = wrap(FakeClient(), record=False, shadow=shadow)
-    _ask(client, "my key is sk-proj-abcdefghijklmnopqrstuvwxyz123456 please help")
+    _ask(client, "my key is sk-" + "proj-abcdefghijklmnopqrstuvwxyz123456 please help")
     assert shadow.flush(10)
     text = (tmp_path / "s.jsonl").read_text(encoding="utf-8")
     assert "sk-proj-abcdefghij" not in text and "<SECRET_1>" in text

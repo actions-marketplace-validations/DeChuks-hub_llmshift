@@ -704,7 +704,7 @@ def _price_agent_tasks(results: list[CaseResult], cases: list[TestCase], cand_sp
             r.baseline_cost_usd = round(usage_cost(old_price, old_usage)[0], 8)
 
 
-_ORDER = {"pass": 0, "warn": 1, "fail": 2, "error": 3}
+_ORDER = {"pass": 0, "warn": 1, "fail": 2, "error": 3}  # nosec B105  # a check status or setting name, not a password
 
 
 def combine_runs(runs: list[CaseResult]) -> CaseResult:

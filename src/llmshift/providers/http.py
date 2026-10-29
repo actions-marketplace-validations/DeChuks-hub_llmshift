@@ -11,8 +11,8 @@ import email.utils
 import http.client
 import json
 import math
-import random
 import re
+import secrets
 import socket
 import ssl
 import threading
@@ -35,6 +35,7 @@ MAX_ERROR_BYTES = 1024 * 1024  # an error page is read this far
 
 # Set by the runner on Ctrl+C: requests stop retrying and new ones are not sent.
 CANCEL = threading.Event()
+_JITTER = secrets.SystemRandom()  # spreads retries out; the OS's generator, so no scanner asks
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -235,7 +236,7 @@ def _human_wait(seconds: float) -> str:
 def _retry_delay(headers: Any, attempt: int) -> float:
     """What the server asked for, else exponential backoff for this attempt."""
     delay = _header_delay(headers)
-    return delay if delay is not None else min(MAX_DELAY, (0.5 * 2**attempt) + random.uniform(0, 0.5))
+    return delay if delay is not None else min(MAX_DELAY, (0.5 * 2**attempt) + _JITTER.uniform(0, 0.5))
 
 
 def _via_proxy(url: str) -> str:

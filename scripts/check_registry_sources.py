@@ -56,12 +56,21 @@ def page_text(raw: str) -> str:
     return " ".join(text.split())
 
 
+def _https(url: str) -> str:
+    """Only https:// addresses (or http:// to this machine, the tests' stand-in server):
+    urllib would read file:// (a local file) just as happily."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost", "::1")):
+        return url
+    raise ValueError(f"not an https:// address: {url}")
+
+
 def fetch(url: str, timeout: float = 30, attempts: int = 2) -> str:
     last: Exception | None = None
     for attempt in range(attempts):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,*/*"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            req = urllib.request.Request(_https(url), headers={"User-Agent": USER_AGENT, "Accept": "text/html,*/*"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310  # https only (_https)
                 charset = resp.headers.get_content_charset() or "utf-8"
                 return resp.read().decode(charset, errors="replace")
         except (urllib.error.URLError, OSError, ValueError) as exc:
@@ -102,7 +111,7 @@ def save_state(result: dict, state: dict) -> None:
 def _github(method: str, path: str, body: dict | None = None) -> object:
     api = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
     req = urllib.request.Request(
-        f"{api}{path}",
+        _https(f"{api}{path}"),
         data=json.dumps(body).encode("utf-8") if body is not None else None,
         method=method,
         headers={
@@ -113,7 +122,7 @@ def _github(method: str, path: str, body: dict | None = None) -> object:
             "User-Agent": USER_AGENT,
         },
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310  # https only (_https)
         raw = resp.read()
     return json.loads(raw) if raw else None
 

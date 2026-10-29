@@ -216,3 +216,14 @@ def test_embeddings_checks_the_corpus_before_announcing_work(in_tmp, capsys):
         (in_tmp / "docs" / f"doc{i}.txt").write_text(f"Refunds take {i + 3} days. Orders ship from warehouse {i}.", encoding="utf-8")
     code, _, err = run(capsys, "embeddings", "--from", "mock:embed-v1", "--to", "mock:embed-v2", "--corpus", "docs")
     assert code in (0, 1) and "Embedding a sample of your corpus with mock:embed-v1 and mock:embed-v2" in err
+
+
+def test_scan_counts_in_words_and_names_the_replacement(in_tmp, capsys):
+    (in_tmp / "app.py").write_text('client.messages.create(model="claude-sonnet-4-5", max_tokens=10)\n', encoding="utf-8")
+    code, out, _ = run(capsys, "scan", "--fail-on", "never")
+    assert code == 0
+    assert "1 file, 1 model reference, 1 distinct model" in out and "1 files" not in out
+    # The next step names the replacement of the most urgent model, and how to keep the check in CI.
+    assert "llmshift compare --to claude-sonnet-5-5" in out and "llmshift init --github" in out
+    code, out, _ = run(capsys, "scan", "--fail-on", "never", "--format", "markdown")
+    assert "1 file scanned, 1 model reference," in out

@@ -2,9 +2,10 @@
 
 Lookup order: --config PATH, then the nearest llmshift.yaml / llmshift.yml /
 .llmshift.yaml / .llmshift/config.yaml or pyproject.toml with a
-[tool.llmshift] table, in the current directory or a parent (up to the git
-root). Relative paths in the file are relative to the file. Values like ${VAR}
-or ${VAR:-default} are expanded from the environment.
+[tool.llmshift] table, in the current directory or a parent up to the git root
+or your home directory (never a drive root, never a file another user owns:
+see find_config). Relative paths in the file are relative to the file. Values
+like ${VAR} or ${VAR:-default} are expanded from the environment.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ DEFAULTS: dict[str, Any] = {
     "cache": True,
     "cache_dir": ".llmshift/cache",
     "reports_dir": ".llmshift/reports",
-    "min_pass_rate": 0.95,
+    "min_pass_rate": 0.95,  # nosec B105  # a check status or setting name, not a password
     "allow_python_checks": False,
     "severity": {},
     "providers": {},
@@ -54,13 +55,13 @@ DEFAULTS: dict[str, Any] = {
     "fix": {
         "rounds": 3,
         "optimizer": None,
-        "target_pass_rate": 1.0,
+        "target_pass_rate": 1.0,  # nosec B105  # a check status or setting name, not a password
         "max_cases_per_group": 12,
     },
     "watch": {
         "history": ".llmshift/watch",
-        "max_pass_rate_drop": 0.05,
-        "min_pass_rate": None,
+        "max_pass_rate_drop": 0.05,  # nosec B105  # a check status or setting name, not a password
+        "min_pass_rate": None,  # nosec B105  # a check status or setting name, not a password
         "max_similarity_drop": 0.10,
         "retirement_warn_days": 30,
         "fail_on": "warning",
@@ -105,20 +106,69 @@ def deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
-def find_config(start: str | os.PathLike | None = None) -> Path | None:
-    """The nearest config file (or pyproject.toml with [tool.llmshift]) at or above `start`."""
+def find_config(start: str | os.PathLike | None = None, *, stop: str | os.PathLike | None = None, notes: list | None = None) -> Path | None:
+    """The nearest config file (or pyproject.toml with [tool.llmshift]) at or above `start`.
+
+    A config can name programs to run, so the search stays inside what is yours, as git
+    has done since CVE-2022-24765: it stops at the git root, at `stop` (the project an MCP
+    server was started on) and at your home directory when `start` is inside it. It never
+    reads a drive root or "/" (any user can create C:\\.llmshift), and on Linux and macOS it
+    skips files that another user owns. On Windows, where owners are not cheap to check,
+    a folder outside your home directory is searched above `start` only up to its git root.
+    Skipped files are noted in `notes`."""
     here = Path(start or os.getcwd()).resolve()
-    for directory in [here, *here.parents]:
-        for name in CONFIG_NAMES:
-            candidate = directory / name
-            if candidate.is_file():
-                return candidate
-        pyproject = directory / "pyproject.toml"
-        if pyproject.is_file() and _load_pyproject(pyproject) is not None:
-            return pyproject
-        if (directory / ".git").exists():
+    home = _home()
+    in_home = home is not None and _within(here, home)
+    limit = Path(stop).resolve() if stop else None
+    chain = [here, *here.parents]
+    if _windows_rules() and not in_home:
+        root = next((d for d in chain if d.parent != d and (d / ".git").exists()), None)
+        chain = chain[: chain.index(root) + 1] if root is not None else [here]
+    for directory in chain:
+        if directory != here and directory.parent == directory:
+            break  # a drive root or "/": shared, and no project lives there
+        for candidate in [directory / name for name in CONFIG_NAMES] + [directory / "pyproject.toml"]:
+            if not candidate.is_file():
+                continue
+            if not _owned_by_you(candidate):
+                if notes is not None:
+                    notes.append(f"ignored {candidate}: another user owns it, and a config can name programs to run")
+                continue
+            if candidate.name == "pyproject.toml" and _load_pyproject(candidate) is None:
+                continue
+            return candidate
+        if (directory / ".git").exists() or directory == limit or (in_home and directory == home):
             break
     return None
+
+
+def _home() -> Path | None:
+    try:
+        return Path.home().resolve()
+    except (RuntimeError, OSError):  # no home directory (some service accounts)
+        return None
+
+
+def _within(path: Path, folder: Path) -> bool:
+    inner, outer = os.path.normcase(str(path)), os.path.normcase(str(folder)).rstrip("\\/")
+    return inner == outer or inner.startswith(outer + os.sep)
+
+
+def _windows_rules() -> bool:
+    return os.name == "nt"
+
+
+def _owned_by_you(path: Path) -> bool:
+    """On Linux and macOS: the file is yours or root's. Root itself reads everything, as in
+    CI containers where the checkout belongs to another user."""
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None:
+        return True
+    uid = geteuid()
+    try:
+        return uid == 0 or path.stat().st_uid in (uid, 0)
+    except OSError:
+        return False
 
 
 _TOOL_TABLE_RE = re.compile(r"^\s*\[\s*tool\s*\.\s*[\"']?llmshift[\"']?\s*[\].]", re.M)
@@ -382,15 +432,17 @@ def _validate(user: dict, source: Path | None) -> None:
         raise ConfigError(f"{where}drop_params must be a list of setting names, e.g. [temperature, top_p]")
 
 
-def load_config(path: str | os.PathLike | None = None) -> Config:
+def load_config(path: str | os.PathLike | None = None, *, stop: str | os.PathLike | None = None) -> Config:
+    """The config at `path`, or the nearest one (see find_config; `stop` bounds the search)."""
     data: dict | None = None
     source: Path | None = None
+    skipped: list[str] = []
     if path:
         source = Path(path)
         if not source.is_file():
             raise ConfigError(f"config file not found: {source}")
     else:
-        source = find_config()
+        source = find_config(stop=stop, notes=skipped)
     if source is not None and source.name == "pyproject.toml":
         data = _load_pyproject(source)
         if data is None:
@@ -414,7 +466,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         _rebase(cfg, base, user)
     cfg.path = source
     cfg.user = user
-    cfg.warnings = config_warnings(user, source)
+    cfg.warnings = skipped + config_warnings(user, source)
     return cfg
 
 

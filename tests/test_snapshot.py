@@ -84,7 +84,7 @@ def test_snapshot_end_to_end(tmp_path):
     truncated = chat_pair("cut", "partial")
     truncated["response"]["choices"][0]["finish_reason"] = "length"
     records.append(truncated)
-    records.append(chat_pair("My key is sk-proj-abcdefghijklmnopqrstuvwxyz123456 and mail bob@example.com", "Noted bob@example.com"))
+    records.append(chat_pair("My key is sk-" + "proj-abcdefghijklmnopqrstuvwxyz123456 and mail bob@example.com", "Noted bob@example.com"))
     write_jsonl(tmp_path / "logs.jsonl", records)
     res = build_snapshot([str(tmp_path / "logs.jsonl")], models=["gpt-4o*"], max_cases=10, per_group=8)
     assert res.filtered["different model"] == 1

@@ -332,7 +332,7 @@ def queries_from_logs(sources: list[str]) -> list[str]:
 
 def pseudo_queries(docs: list[Doc], count: int, seed: int) -> list[str]:
     """First sentences of a sample of documents, when no real queries are available."""
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # nosec B311  # seeded on purpose: the same sample on every run; nothing secret
     picked = rng.sample(docs, min(count, len(docs)))
     out = []
     for doc in picked:
@@ -458,7 +458,7 @@ def run_embedding_migration(
     docs = load_corpus(corpus, chunk_chars)
     if not docs:
         raise UsageError(f"no documents found in {', '.join(corpus)} (looked for {', '.join(sorted(TEXT_SUFFIXES))})")
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # nosec B311  # seeded on purpose: the same sample on every run; nothing secret
     sample = docs if len(docs) <= max_docs else [docs[i] for i in sorted(rng.sample(range(len(docs)), max_docs))]
     notes: list[str] = []
     if queries is None:
@@ -468,7 +468,7 @@ def run_embedding_migration(
     if not queries:
         raise UsageError("no queries to compare (the queries file or logs contained none)")
     if len(queries) > max_queries:
-        queries = [queries[i] for i in sorted(random.Random(seed).sample(range(len(queries)), max_queries))]
+        queries = [queries[i] for i in sorted(random.Random(seed).sample(range(len(queries)), max_queries))]  # nosec B311  # seeded on purpose: the same sample on every run; nothing secret
     depth = min(k, len(sample))
     if depth < k:
         notes.append(f"Only {len(sample)} document chunks, so the top {depth} were compared instead of the top {k}.")

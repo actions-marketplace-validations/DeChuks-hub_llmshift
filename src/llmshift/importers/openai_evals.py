@@ -11,7 +11,8 @@ Sources
       llmshift import openai-evals --api --eval-id eval_abc --eval-id eval_def
   For each eval: its testing criteria, its latest run's data source, and the
   run's output items (inputs actually sent + outputs the model gave), which
-  become the recorded baselines.
+  become the recorded baselines. --save-raw also keeps every API response as
+  read, in a dated JSON file next to the tests.
 * Exported JSON (an eval object, or {"eval":..., "runs":..., "output_items":...}),
   optionally with a data file of {"item": {...}} lines:
       llmshift import openai-evals eval.json --data items.jsonl
@@ -31,6 +32,7 @@ Grader mapping
 
 from __future__ import annotations
 
+import base64
 import fnmatch
 import gzip
 import json
@@ -104,6 +106,7 @@ class ImportResult:
     evals: list[EvalImport] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     agreement: dict = field(default_factory=dict)
+    raw: list[dict] = field(default_factory=list)  # every API response as read, with keep_raw
 
 
 # ------------------------------------------------------------- utilities
@@ -349,9 +352,13 @@ class EvalsClient:
             self.headers["OpenAI-Organization"] = org
         if project:
             self.headers["OpenAI-Project"] = project
+        self.raw: list[dict] | None = None  # a list keeps every response body, as read (never the headers)
 
     def get(self, path: str) -> Any:
-        return http.get_json(f"{self.base_url}{path}", headers=self.headers, timeout=120, max_retries=5)
+        body = http.get_json(f"{self.base_url}{path}", headers=self.headers, timeout=120, max_retries=5)
+        if self.raw is not None:
+            self.raw.append({"path": path, "body": body})
+        return body
 
     def paginate(self, path: str, limit: int = 100, extra: str = "") -> Iterator[dict]:
         after = None
@@ -368,7 +375,15 @@ class EvalsClient:
                 return
 
     def file_content(self, file_id: str) -> bytes:
-        return http.request("GET", f"{self.base_url}/files/{file_id}/content", headers=self.headers, timeout=300, max_retries=5, raw=True)
+        data = http.request("GET", f"{self.base_url}/files/{file_id}/content", headers=self.headers, timeout=300, max_retries=5, raw=True)
+        if self.raw is not None:
+            entry: dict = {"path": f"/files/{file_id}/content"}
+            try:
+                entry["text"] = data.decode("utf-8") if isinstance(data, bytes) else str(data)
+            except UnicodeDecodeError:  # gzip or another binary file: kept byte for byte
+                entry["base64"] = base64.b64encode(data).decode("ascii")
+            self.raw.append(entry)
+        return data
 
 
 def _items_from_jsonl(data: bytes | str, where: Any = "the data file", warnings: list[str] | None = None) -> list[dict]:
@@ -563,9 +578,12 @@ def import_from_api(
     max_items: int | None = None,
     name_filter: list[str] | None = None,
     progress: Any = None,
+    keep_raw: bool = False,
 ) -> ImportResult:
     client = client or EvalsClient()
     result = ImportResult()
+    if keep_raw:
+        client.raw = result.raw
     if eval_ids:
         evals = _dicts([client.get(f"/evals/{eid}") for eid in eval_ids])
     elif all_evals:

@@ -335,7 +335,7 @@ def test_command_providers_honour_the_timeout_and_notice_edited_scripts(tmp_path
 
 
 @pytest.mark.parametrize("value, url", [
-    ("0.0.0.0", "http://127.0.0.1:11434"),  # every interface, to a server: this machine, to a client
+    ("0.0.0.0", "http://127.0.0.1:11434"),  # nosec B104  # an OLLAMA_HOST value under test; nothing binds. Every interface, to a server: this machine, to a client
     ("localhost", "http://localhost:11434"),
     (":11434", "http://127.0.0.1:11434"),
     ("HTTP://Box:1", "http://Box:1"),

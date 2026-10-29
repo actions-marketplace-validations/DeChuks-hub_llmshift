@@ -13,7 +13,7 @@ import contextlib
 import contextvars
 import json
 import re
-import subprocess
+import subprocess  # nosec B404  # user regexes run in a child Python process, so a slow one can be stopped
 import sys
 import threading
 import time
@@ -74,7 +74,7 @@ def _start() -> subprocess.Popen | None:
     if getattr(sys, "frozen", False) or not sys.executable:
         return None  # sys.executable is the frozen app itself, or nothing at all
     try:
-        proc = subprocess.Popen(
+        proc = subprocess.Popen(  # nosec B603  # this Python, by full path, isolated (-I -S); no shell
             [sys.executable, "-I", "-S", "-c", _WORKER],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -102,16 +102,12 @@ def _start() -> subprocess.Popen | None:
 def _stop(proc: subprocess.Popen | None) -> None:
     if proc is None:
         return
-    try:
+    with contextlib.suppress(Exception):
         proc.kill()
         proc.wait(timeout=5)
-    except Exception:
-        pass
     for pipe in (proc.stdin, proc.stdout):
-        try:
+        with contextlib.suppress(Exception):
             pipe.close()
-        except Exception:
-            pass
 
 
 def search(pattern: str, text: str, flags: int = 0, timeouts: dict | None = None) -> bool:

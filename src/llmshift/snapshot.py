@@ -188,7 +188,7 @@ def build_snapshot(
     result.groups = len(groups)
     result.group_sizes = {g: len(v) for g, v in groups.items()}
 
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # nosec B311  # seeded on purpose: the same sample on every run; nothing secret
     quotas = _allocate({g: len(v) for g, v in groups.items()}, max(1, max_cases), max(1, per_group))
     selected: list[tuple[str, Interaction]] = []
     for g in sorted(groups):

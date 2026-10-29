@@ -95,7 +95,7 @@ def candidate_pairs(results_path: Path, count: int, seed: int, already: set[str]
         if c.baseline_output.strip() == c.candidate_output.strip():
             continue
         pool[c.status].append(c)
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # nosec B311  # seeded on purpose: the same sample on every run; nothing secret
     for items in pool.values():
         rng.shuffle(items)
     picked = []

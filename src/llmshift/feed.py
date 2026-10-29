@@ -5,7 +5,8 @@
            bundled with this release.
 * digest   sends one message listing the models your repositories use that are retired
            or retire soon (made for a weekly Slack, Teams or e-mail post).
-* calendar builds a static website and an iCalendar feed of retirement dates.
+* calendar builds a static website (with a page per model and per provider, made to be found
+           by search engines and AI assistants) and an iCalendar feed of retirement dates.
 """
 
 from __future__ import annotations
@@ -19,8 +20,10 @@ import re
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from email.utils import format_datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from . import __version__, fileio
 from . import console as con
@@ -28,7 +31,7 @@ from . import registry as reglib
 from .errors import EXIT_FAIL, EXIT_OK, UsageError
 from .providers import http
 from .providers.base import ProviderError
-from .textutil import json_loads
+from .textutil import json_loads, plural, quoteattr, xml_escape
 
 DEFAULT_REGISTRY_URL = "https://raw.githubusercontent.com/DeChuks-hub/llmshift/main/src/llmshift/data/models.json"
 DEFAULT_PRICES_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
@@ -606,7 +609,7 @@ def _days_text(days: int) -> str:
     return "yesterday" if days == -1 else f"{-days} days ago"
 
 
-def _rows(items: list, now: _dt.date, dated: bool) -> str:
+def _rows(items: list, now: _dt.date, dated: bool, links: dict | None = None) -> str:
     esc = html.escape
     out = []
     for lk in items:
@@ -617,16 +620,19 @@ def _rows(items: list, now: _dt.date, dated: bool) -> str:
         if dated:
             days = (lk.retires - now).days
             when = f'<td><time datetime="{lk.retires.isoformat()}">{lk.retires.isoformat()}</time><div class="days">{_days_text(days)}</div></td>'
+        page = (links or {}).get((lk.provider, lk.model))
+        name = f'<a href="{esc(page)}"><code>{esc(lk.model)}</code></a>' if page else f"<code>{esc(lk.model)}</code>"
         out.append(
             f'<tr data-model="{esc(lk.model)}" data-provider="{esc(lk.provider)}"'
             + (f' data-date="{lk.retires.isoformat()}"' if dated else "")
-            + f' data-search="{esc(search)}">{when}<td><code>{esc(lk.model)}</code></td><td>{esc(provider)}</td>'
+            + f' data-search="{esc(search)}">{when}<td>{name}</td><td>{esc(provider)}</td>'
             f"<td>{esc(lk.replacement or '-')}</td><td>{source}</td></tr>"
         )
     return "\n".join(out)
 
 
-def build_page(entries: dict[str, list], updated: str | None, *, title: str, days_back: int, count_url: str | None = None) -> str:
+def build_page(entries: dict[str, list], updated: str | None, *, title: str, days_back: int, count_url: str | None = None,
+               links: dict | None = None, base_url: str | None = None) -> str:
     esc = html.escape
     now = reglib.today()
     foot = "Collected from the providers' official deprecation pages. Dates can move: check the source before you plan around one."
@@ -644,8 +650,15 @@ def build_page(entries: dict[str, list], updated: str | None, *, title: str, day
         empty = '<p class="empty" hidden>No matching models.</p>' if items else '<p class="empty">None.</p>'
         return (
             f'<section data-section="{name}"><h2>{esc(heading)} (<span class="count">{len(items)}</span>)</h2>'
-            f'<div class="table-wrap"><table><thead>{head}</thead><tbody>\n{_rows(items, now, dated)}\n</tbody></table>{empty}</div></section>'
+            f'<div class="table-wrap"><table><thead>{head}</thead><tbody>\n{_rows(items, now, dated, links)}\n</tbody></table>{empty}</div></section>'
         )
+
+    head_links = ""
+    if base_url:
+        head_links = (f'\n<link rel="canonical" href="{esc(base_url)}">'
+                      f'\n<link rel="alternate" type="application/rss+xml" title="AI model retirements" href="{esc(base_url)}feed.xml">')
+    more = '<a href="models/">Every model, by provider</a>' if links else ""
+    more += '<a href="feed.xml">RSS</a>' if base_url else ""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -653,14 +666,14 @@ def build_page(entries: dict[str, list], updated: str | None, *, title: str, day
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(title)}</title>
-<meta name="description" content="Upcoming shutdown dates of AI models from OpenAI, Anthropic, Google, Mistral, Cohere, xAI and DeepSeek.">
+<meta name="description" content="Upcoming shutdown dates of AI models from OpenAI, Anthropic, Google, Mistral, Cohere, xAI and DeepSeek.">{head_links}
 <style>{_PAGE_CSS}</style>
 </head>
 <body>
 <main>
 <h1>{esc(title)}</h1>
 <p class="lede">When AI models shut down, and what replaces them. Lifecycle data updated {esc(str(updated))}; page built {now.isoformat()}.</p>
-<p class="actions"><a id="webcal" href="retirements.ics" hidden>Subscribe in your calendar</a><a href="retirements.ics">Download the calendar (.ics)</a><a href="retirements.json">JSON</a><a href="https://github.com/DeChuks-hub/llmshift">Find these models in your code with llmshift</a></p>
+<p class="actions"><a id="webcal" href="retirements.ics" hidden>Subscribe in your calendar</a><a href="retirements.ics">Download the calendar (.ics)</a><a href="retirements.json">JSON</a>{more}<a href="https://github.com/DeChuks-hub/llmshift">Find these models in your code with llmshift</a></p>
 <div class="filters">
 <input id="q" type="search" placeholder="Search models or replacements" aria-label="Search models or replacements">
 <select id="provider" aria-label="Provider"><option value="">All providers</option>{options}</select>
@@ -677,12 +690,387 @@ def build_page(entries: dict[str, list], updated: str | None, *, title: str, day
 """
 
 
+# ------------------------------------------------------------- model pages
+
+_MODEL_CSS = """
+nav.crumbs { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+nav.crumbs a { color: var(--muted); }
+h1 code { font-size: inherit; word-break: break-all; }
+.facts th { width: 180px; }
+.status { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 1px 8px; border-radius: 999px; background: var(--soft); }
+.status.retiring, .status.deprecated { color: var(--warn); }
+.status.retired { color: var(--bad); }
+ol.steps { padding-left: 22px; }
+ol.steps li { margin: 12px 0; }
+pre { background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; overflow-x: auto; margin: 6px 0 0; }
+pre code { word-break: normal; }
+.box { border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 18px 0; background: var(--soft); }
+ul.links { padding-left: 20px; }
+ul.links li { margin: 4px 0; }
+"""
+
+# What the providers answer once a model is gone, for people who search the error.
+_GONE_ERRORS = {
+    "openai": "Error code: 404 - model_not_found: The model `{model}` does not exist or you do not have access to it.",
+    "anthropic": "Error code: 404 - not_found_error: model: {model}",
+    "google": "404 NOT_FOUND: models/{model} is not found for API version v1beta, or is not supported for generateContent.",
+}
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9._-]+", "-", str(text).lower()).strip("-.") or "model"
+
+
+def _short_name(provider: str) -> str:
+    """The provider's name where it sits in parentheses (no "Google (Gemini API)" inside another pair)."""
+    return {"google": "Gemini API", "google-vertex": "Vertex AI"}.get(provider) or PROVIDER_NAMES.get(provider, provider)
+
+
+def model_paths(lookups: list) -> dict[tuple[str, str], str]:
+    """`models/<provider>/<model>/` for each (provider, model), unique even where IDs differ only in case or punctuation
+    (folders must not collide on case-insensitive disks). Sorted first, so a model keeps its address across builds."""
+    taken: set[str] = set()
+    paths: dict[tuple[str, str], str] = {}
+    for lk in sorted(lookups, key=lambda lk: (lk.provider, lk.model.lower(), lk.model)):
+        key = (lk.provider, lk.model)
+        if key in paths:
+            continue
+        base = f"models/{_slug(lk.provider)}/{_slug(lk.model)}"
+        path, n = base, 2
+        while path in taken:
+            path, n = f"{base}-{n}", n + 1
+        taken.add(path)
+        paths[key] = path + "/"
+    return paths
+
+
+def base_url_value(value: str) -> str:
+    """The site's public https:// address, ending in a slash."""
+    value = value.strip()
+    if not re.fullmatch(r"https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~%/-]*)?", value):
+        raise UsageError(f"--base-url takes the site's https:// address, e.g. https://you.github.io/repo/, not {value!r}")
+    return value if value.endswith("/") else value + "/"
+
+
+def _long_date(day: _dt.date) -> str:
+    return f"{day.day} {day:%B %Y}"
+
+
+def _when_text(lk: Any, provider: str, now: _dt.date) -> str:
+    if lk.retires and lk.retires >= now:
+        return f"{provider} retires {lk.model} on {_long_date(lk.retires)} ({_days_text((lk.retires - now).days)})."
+    if lk.retires:
+        return f"{provider} retired {lk.model} on {_long_date(lk.retires)}."
+    if lk.status == "deprecated":
+        return f"{provider} has deprecated {lk.model} but has not set a shutdown date yet."
+    if lk.not_before:
+        return f"{lk.model} is active. {provider} will not retire it before {_long_date(lk.not_before)}."
+    return f"{lk.model} is active. {provider} has not announced a shutdown date."
+
+
+def _state(lk: Any, now: _dt.date) -> str:
+    if lk.retires:
+        return "retiring" if lk.retires >= now else "retired"
+    return "deprecated" if lk.status == "deprecated" else "active"
+
+
+def _page_head(*, title: str, description: str, url: str | None, extra_css: str = "", ld: Any = None) -> str:
+    esc = html.escape
+    head = [
+        '<meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"<title>{esc(title)}</title>",
+        f'<meta name="description" content="{esc(description)}">',
+        f'<meta property="og:title" content="{esc(title)}">',
+        f'<meta property="og:description" content="{esc(description)}">',
+        '<meta property="og:type" content="website">',
+        '<meta property="og:site_name" content="AI model retirement calendar">',
+        '<meta name="twitter:card" content="summary">',
+    ]
+    if url:
+        head += [f'<link rel="canonical" href="{esc(url)}">', f'<meta property="og:url" content="{esc(url)}">']
+    head.append(f"<style>{_PAGE_CSS}{extra_css}</style>")
+    if ld is not None:
+        # JSON in a <script> element: "<" is escaped so no value can close the element.
+        head.append('<script type="application/ld+json">' + json.dumps(ld, ensure_ascii=False).replace("<", "\\u003c") + "</script>")
+    return "\n".join(head)
+
+
+def _counter(count_url: str | None) -> str:
+    if not count_url:
+        return ""
+    return f'\n<script data-goatcounter="{html.escape(count_url)}" async src="{_GOATCOUNTER_JS}" crossorigin="anonymous" integrity="{_GOATCOUNTER_SRI}"></script>'
+
+
+def _foot(updated: str | None, count_url: str | None) -> str:
+    foot = (f"Lifecycle data updated {html.escape(str(updated))}, collected from the providers' official deprecation pages. "
+            "Dates can move: check the source before you plan around one.")
+    if count_url:
+        foot += ' Visits are counted with <a href="https://www.goatcounter.com" rel="noopener">GoatCounter</a>, which sets no cookies.'
+    return f'<p class="foot">{foot}</p>'
+
+
+def build_model_page(lk: Any, *, path: str, paths: dict, related: list, updated: str | None, now: _dt.date,
+                     base_url: str | None = None, count_url: str | None = None) -> str:
+    esc = html.escape
+    provider = PROVIDER_NAMES.get(lk.provider, lk.provider)
+    root = "../" * path.count("/")
+    state = _state(lk, now)
+    when = _when_text(lk, provider, now)
+    is_model = not lk.model.startswith("/")  # a few entries are API endpoints, such as /v1/answers
+    replacement = lk.replacement if lk.replacement and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@-]*", lk.replacement) else None
+    title = f"{lk.model} retirement date and replacement ({_short_name(lk.provider)})"
+    description = when + (f" Replacement: {lk.replacement}." if lk.replacement else "") + \
+        " Find every call in your code and test the replacement before you switch."
+
+    def link_to(model: str) -> str:
+        target = paths.get((lk.provider, model))
+        return f'<a href="{root}{esc(target)}"><code>{esc(model)}</code></a>' if target else f"<code>{esc(model)}</code>"
+
+    rows = [("Provider", esc(provider) + (f" ({esc(lk.platform)})" if lk.platform else "")),
+            ("Status", f'<span class="status {state}">{state}</span>' + (" (an unpinned alias)" if lk.alias else "")),
+            ("Shutdown date", f'<time datetime="{lk.retires.isoformat()}">{lk.retires.isoformat()}</time>' if lk.retires else "not announced")]
+    if lk.deprecated:
+        rows.append(("Deprecated on", f'<time datetime="{lk.deprecated.isoformat()}">{lk.deprecated.isoformat()}</time>'))
+    if lk.not_before:
+        rows.append(("Not retired before", lk.not_before.isoformat()))
+    rows.append(("Replacement", link_to(lk.replacement) if lk.replacement else "none named"))
+    if lk.fine_tune_of:
+        rows.append(("Fine-tune of", link_to(lk.fine_tune_of)))
+    if lk.source and re.match(r"^https?://", lk.source):
+        rows.append(("Source", f'<a href="{esc(lk.source)}" rel="noopener">{esc(lk.source)}</a>'))
+    if lk.note:
+        rows.append(("Note", esc(lk.note)))
+    facts = "\n".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
+
+    to = replacement or "<new model>"
+    steps = [f'<li>Find every call to it in your code (Python, JS/TS, Go, Java, configs, notebooks), with nothing to install:'
+             f"<pre><code>uvx llmshift scan</code></pre></li>"]
+    if is_model:
+        steps += [
+            f'<li>Turn your real traffic into tests, so you compare on what your users send:<pre><code>llmshift snapshot logs/ --model "{esc(lk.model)}"</code></pre></li>',
+            f"<li>See exactly what changes on the {'replacement' if replacement else 'new model'}: formats, facts, tone, tool calls and settings it rejects:"
+            f"<pre><code>llmshift compare --to {esc(to)}</code></pre></li>",
+            f'<li>Swap the model in your code and open a pull request with the results:<pre><code>llmshift upgrade --from "{esc(lk.model)}" --apply --compare --pr</code></pre></li>',
+        ]
+    heading = {"retiring": f"Before {_long_date(lk.retires) if lk.retires else ''}: move off it safely",
+               "retired": "Move off it now", "deprecated": "Move off it before a date is set",
+               "active": "When it retires, be ready"}[state]
+    error = ""
+    if state == "retired" and is_model and lk.provider in _GONE_ERRORS:
+        error = (f"<h2>The error you get now</h2><p>Calls to a model after its shutdown fail. The answer usually reads "
+                 f"(the wording varies by SDK and endpoint):</p><pre><code>{esc(_GONE_ERRORS[lk.provider].format(model=lk.model))}</code></pre>")
+    others = ""
+    if related:
+        items = "\n".join(
+            f'<li><a href="{root}{esc(paths[(o.provider, o.model)])}"><code>{esc(o.model)}</code></a>: '
+            f"{'retires' if o.retires >= now else 'retired'} {o.retires.isoformat()}</li>" for o in related)
+        others = f"<h2>Other {esc(provider)} retirements</h2><ul class=\"links\">\n{items}\n</ul>"
+    report = (f"https://github.com/DeChuks-hub/llmshift/issues/new?title="
+              + quote(f"Lifecycle data: {lk.model} ({lk.provider})") + "&labels=data")
+    answers = [
+        {"@type": "Question", "name": f"When does {lk.model} retire?", "acceptedAnswer": {"@type": "Answer", "text": when}},
+        {"@type": "Question", "name": f"What replaces {lk.model}?", "acceptedAnswer": {"@type": "Answer", "text":
+            f"{provider} names {lk.replacement} as the replacement." if lk.replacement else f"{provider} has not named a replacement."}},
+        {"@type": "Question", "name": f"How do I find {lk.model} in my code?", "acceptedAnswer": {"@type": "Answer", "text":
+            "Run uvx llmshift scan in the repository. It lists every model the code calls, when each retires, and the files and lines that call it."}},
+    ]
+    head = _page_head(title=title, description=description, url=f"{base_url}{path}" if base_url else None, extra_css=_MODEL_CSS,
+                      ld={"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": answers})
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+{head}
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="{root}">AI model retirement calendar</a> / <a href="{root}{esc(_provider_path(lk.provider))}">{esc(provider)}</a></nav>
+<h1><code>{esc(lk.model)}</code></h1>
+<p class="lede">{esc(when)}{f" Replacement: <code>{esc(lk.replacement)}</code>." if lk.replacement else ""}</p>
+<div class="table-wrap"><table class="facts"><tbody>
+{facts}
+</tbody></table></div>
+<h2>{esc(heading)}</h2>
+<ol class="steps">
+{chr(10).join(steps)}
+</ol>
+<p>Then <code>llmshift init --github</code> keeps the check on every pull request. <a href="https://github.com/DeChuks-hub/llmshift">LLMShift</a> is free and open source (MIT) and runs on your machine.</p>
+{error}
+{others}
+<div class="box">Wrong date or replacement? <a href="{esc(report)}" rel="noopener">Tell us on GitHub</a>, with a link to the provider's page.</div>
+{_foot(updated, count_url)}
+</main>{_counter(count_url)}
+</body>
+</html>
+"""
+
+
+def _provider_path(provider: str) -> str:
+    return f"models/{_slug(provider)}/"
+
+
+def build_provider_page(provider: str, lookups: list, *, paths: dict, updated: str | None, now: _dt.date,
+                        base_url: str | None = None, count_url: str | None = None) -> str:
+    esc = html.escape
+    name = PROVIDER_NAMES.get(provider, provider)
+    path = _provider_path(provider)
+    root = "../" * path.count("/")
+    groups: dict[str, list] = {"retiring": [], "deprecated": [], "retired": [], "active": []}
+    for lk in lookups:
+        groups[_state(lk, now)].append(lk)
+    groups["retiring"].sort(key=lambda lk: (lk.retires, lk.model))
+    groups["retired"].sort(key=lambda lk: (lk.retires, lk.model), reverse=True)
+    groups["deprecated"].sort(key=lambda lk: lk.model)
+    groups["active"].sort(key=lambda lk: lk.model)
+
+    def table(items: list, dated: bool) -> str:
+        if not items:
+            return '<p class="empty">None.</p>'
+        head = "<tr>" + ("<th>Date</th>" if dated else "") + "<th>Model</th><th>Replacement</th></tr>"
+        body = "\n".join(
+            "<tr>" + (f'<td><time datetime="{lk.retires.isoformat()}">{lk.retires.isoformat()}</time></td>' if dated else "")
+            + f'<td><a href="{root}{esc(paths[(lk.provider, lk.model)])}"><code>{esc(lk.model)}</code></a></td>'
+            f"<td>{esc(lk.replacement or '-')}</td></tr>" for lk in items)
+        return f'<div class="table-wrap"><table><thead>{head}</thead><tbody>\n{body}\n</tbody></table></div>'
+
+    counts = f"{len(groups['retiring'])} retiring, {len(groups['deprecated'])} deprecated without a date, {len(groups['retired'])} retired, {len(groups['active'])} active"
+    head = _page_head(title=f"{name} model retirement dates and replacements",
+                      description=f"When {name} models shut down, and what replaces them: {counts}.",
+                      url=f"{base_url}{path}" if base_url else None, extra_css=_MODEL_CSS)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+{head}
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="{root}">AI model retirement calendar</a> / <a href="{root}models/">All providers</a></nav>
+<h1>{esc(name)} model retirement dates</h1>
+<p class="lede">{esc(counts)}. Find the ones your code calls with <code>uvx llmshift scan</code>.</p>
+<h2>Retiring</h2>
+{table(groups["retiring"], True)}
+<h2>Deprecated, no shutdown date yet</h2>
+{table(groups["deprecated"], False)}
+<h2>Retired</h2>
+{table(groups["retired"], True)}
+<h2>Active</h2>
+{table(groups["active"], False)}
+{_foot(updated, count_url)}
+</main>{_counter(count_url)}
+</body>
+</html>
+"""
+
+
+def build_models_index(by_provider: dict[str, list], *, updated: str | None, now: _dt.date, base_url: str | None = None,
+                       count_url: str | None = None) -> str:
+    esc = html.escape
+    items = []
+    for provider in sorted(by_provider, key=lambda p: PROVIDER_NAMES.get(p, p).lower()):
+        states = [_state(lk, now) for lk in by_provider[provider]]
+        items.append(f'<li><a href="{esc(_provider_path(provider)[len("models/"):])}">{esc(PROVIDER_NAMES.get(provider, provider))}</a>: '
+                     f"{states.count('retiring')} retiring, {states.count('retired')} retired, {len(states)} models</li>")
+    head = _page_head(title="AI model retirement dates by provider",
+                      description="Shutdown dates and replacements of every AI model LLMShift tracks, by provider.",
+                      url=f"{base_url}models/" if base_url else None, extra_css=_MODEL_CSS)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+{head}
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../">AI model retirement calendar</a></nav>
+<h1>AI model retirement dates by provider</h1>
+<ul class="links">
+{chr(10).join(items)}
+</ul>
+{_foot(updated, count_url)}
+</main>{_counter(count_url)}
+</body>
+</html>
+"""
+
+
+def build_sitemap(base_url: str, paths: list[str], updated: str | None) -> bytes:
+    lastmod = (reglib._date(updated) or reglib.today()).isoformat()
+    urls = "".join(f"<url><loc>{xml_escape(base_url + p)}</loc><lastmod>{lastmod}</lastmod></url>\n" for p in paths)
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            + urls + "</urlset>\n").encode("utf-8")
+
+
+def build_rss(base_url: str, entries: dict[str, list], paths: dict, updated: str | None, *, horizon: int = 365) -> bytes:
+    """RSS 2.0: retirements in the next `horizon` days and recent ones, newest announcement first."""
+    now = reglib.today()
+    built = reglib._date(updated) or now
+    picked = [lk for lk in entries["upcoming"] if (lk.retires - now).days <= horizon] + entries["recent"]
+
+    def rfc822(day: _dt.date) -> str:
+        return format_datetime(_dt.datetime(day.year, day.month, day.day, tzinfo=_dt.timezone.utc))
+
+    items = []
+    for lk in sorted(picked, key=lambda lk: (lk.deprecated or built, lk.retires, lk.model), reverse=True):
+        provider = _short_name(lk.provider)
+        verb = "retires" if lk.retires >= now else "retired"
+        about = f"{lk.model} ({provider}) {verb} on {lk.retires.isoformat()}." + (f" Replacement: {lk.replacement}." if lk.replacement else "")
+        link = base_url + paths[(lk.provider, lk.model)]
+        items.append(
+            f"<item><title>{xml_escape(f'{lk.model} ({provider}) {verb} on {lk.retires.isoformat()}')}</title>"
+            f"<link>{xml_escape(link)}</link>"
+            f'<guid isPermaLink="false">{xml_escape(f"llmshift:{lk.provider}:{lk.model}:{lk.retires.isoformat()}")}</guid>'
+            f"<pubDate>{rfc822(lk.deprecated or built)}</pubDate><category>{xml_escape(lk.provider)}</category>"
+            f"<description>{xml_escape(about)}</description></item>"
+        )
+    feed_url = base_url + "feed.xml"
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>\n'
+            "<title>AI model retirements</title>"
+            f"<link>{xml_escape(base_url)}</link><atom:link href={quoteattr(feed_url)} rel=\"self\" type=\"application/rss+xml\"/>"
+            "<description>Shutdown dates of AI models and their replacements, from LLMShift's lifecycle data.</description>"
+            f"<language>en</language><lastBuildDate>{rfc822(built)}</lastBuildDate>\n"
+            + "\n".join(items) + "\n</channel></rss>\n").encode("utf-8")
+
+
+def build_llms_txt(entries: dict[str, list], by_provider: dict[str, list], paths: dict, updated: str | None, *,
+                   base_url: str | None, horizon: int = 90) -> str:
+    """https://llmstxt.org: what an AI assistant needs to answer "when does model X retire?" from this site."""
+    now = reglib.today()
+    root = base_url or ""
+    lines = [
+        "# AI model retirement calendar",
+        "",
+        "> When AI models from OpenAI, Anthropic, Google, Mistral, Cohere, xAI and DeepSeek shut down, and what replaces them. "
+        f"Built every day from the providers' deprecation pages by LLMShift. Lifecycle data updated {updated}.",
+        "",
+        "To find the models a codebase calls and when each retires, run `uvx llmshift scan` in the repository. "
+        "LLMShift (https://github.com/DeChuks-hub/llmshift) then turns real traffic into tests and checks the replacement "
+        "before the switch (`llmshift snapshot`, `llmshift compare`, `llmshift upgrade`).",
+        "",
+        "## Data",
+        "",
+        f"- [Retirement dates as JSON]({root}retirements.json): upcoming, recently retired and deprecated models, with replacements and sources",
+        f"- [iCalendar feed]({root}retirements.ics): one event per shutdown date",
+    ]
+    if base_url:
+        lines.append(f"- [RSS feed]({root}feed.xml): retirements in the next year")
+    lines += ["", "## Providers", ""]
+    for provider in sorted(by_provider, key=lambda p: PROVIDER_NAMES.get(p, p).lower()):
+        n = len(by_provider[provider])
+        lines.append(f"- [{PROVIDER_NAMES.get(provider, provider)}]({root}{_provider_path(provider)}): {n} models")
+    soon = [lk for lk in entries["upcoming"] if (lk.retires - now).days <= horizon]
+    lines += ["", f"## Retiring in the next {horizon} days", ""]
+    lines += [f"- [{lk.model}]({root}{paths[(lk.provider, lk.model)]}) ({_short_name(lk.provider)}): "
+              f"retires {lk.retires.isoformat()}" + (f", replacement {lk.replacement}" if lk.replacement else "") for lk in soon] or ["- None."]
+    return "\n".join(lines) + "\n"
+
+
 def build_calendar(out_dir: str | Path, *, registry: Any = None, days_back: int = 90, title: str = "AI model retirement calendar",
-                   goatcounter: str | None = None) -> dict:
-    """Write index.html, retirements.ics and retirements.json; return what was written."""
+                   goatcounter: str | None = None, base_url: str | None = None) -> dict:
+    """Write index.html, retirements.ics, retirements.json, a page per model and per provider and llms.txt; with
+    `base_url`, also sitemap.xml, robots.txt and feed.xml, which need absolute addresses. Return what was written."""
     if days_back < 0:
         raise UsageError("--days-back must be zero or more")
     count_url = goatcounter_url(goatcounter) if goatcounter else None
+    base = base_url_value(base_url) if base_url else None
     reg = registry or reglib.Registry.load()
     entries = calendar_entries(reg, days_back)
     out = Path(out_dir)
@@ -697,21 +1085,62 @@ def build_calendar(out_dir: str | Path, *, registry: Any = None, days_back: int 
         "recent": [lk.to_dict() for lk in entries["recent"]],
         "deprecated_without_date": [lk.to_dict() for lk in entries["undated"]],
     }
-    page = build_page(entries, reg.updated, title=title, days_back=days_back, count_url=count_url)
-    (out / "index.html").write_bytes(page.encode("utf-8", "replace"))
-    (out / "retirements.ics").write_bytes(build_ics(entries, reg.updated))
-    (out / "retirements.json").write_bytes((json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8", "replace"))
-    return {"dir": str(out), "files": ["index.html", "retirements.ics", "retirements.json"], "counts": {k: len(v) for k, v in entries.items()}}
+    now = reglib.today()
+    every = reg.search(warn_days=0)
+    paths = model_paths(every)
+    by_provider: dict[str, list] = {}
+    for lk in every:
+        if paths.get((lk.provider, lk.model)) and all(o.model != lk.model for o in by_provider.get(lk.provider, [])):
+            by_provider.setdefault(lk.provider, []).append(lk)
+
+    def write(rel: str, content: str | bytes) -> None:
+        target = out / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8", "replace"))
+
+    page = build_page(entries, reg.updated, title=title, days_back=days_back, count_url=count_url, links=paths, base_url=base)
+    write("index.html", page)
+    write("retirements.ics", build_ics(entries, reg.updated))
+    write("retirements.json", json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    dated = sorted((lk for group in by_provider.values() for lk in group if lk.retires), key=lambda lk: lk.retires)
+    for provider, lookups in by_provider.items():
+        for lk in lookups:
+            # Nearby retirements from the same provider: the next ones to come, else the latest ones gone.
+            peers = [o for o in dated if o.provider == provider and o.model != lk.model and not o.model.startswith("/")]
+            related = ([o for o in peers if o.retires >= now][:6] or peers[-6:][::-1])
+            write(paths[(lk.provider, lk.model)] + "index.html",
+                  build_model_page(lk, path=paths[(lk.provider, lk.model)], paths=paths, related=related, updated=reg.updated,
+                                   now=now, base_url=base, count_url=count_url))
+        write(_provider_path(provider) + "index.html",
+              build_provider_page(provider, lookups, paths=paths, updated=reg.updated, now=now, base_url=base, count_url=count_url))
+    write("models/index.html", build_models_index(by_provider, updated=reg.updated, now=now, base_url=base, count_url=count_url))
+    write("llms.txt", build_llms_txt(entries, by_provider, paths, reg.updated, base_url=base))
+    files = ["index.html", "retirements.ics", "retirements.json", "llms.txt"]
+    if base:
+        pages = [""] + ["models/"] + sorted(_provider_path(p) for p in by_provider) + sorted(
+            paths[(lk.provider, lk.model)] for group in by_provider.values() for lk in group)
+        write("sitemap.xml", build_sitemap(base, pages, reg.updated))
+        write("robots.txt", f"User-agent: *\nAllow: /\n\nSitemap: {base}sitemap.xml\n")
+        write("feed.xml", build_rss(base, entries, paths, reg.updated))
+        files += ["sitemap.xml", "robots.txt", "feed.xml"]
+    model_pages = sum(len(group) for group in by_provider.values())
+    return {"dir": str(out), "files": files, "model_pages": model_pages, "provider_pages": len(by_provider),
+            "counts": {k: len(v) for k, v in entries.items()}}
 
 
 def cmd_calendar(args: argparse.Namespace, cfg: dict) -> int:
     reg = reglib.Registry.load(args.registry or [])
-    written = build_calendar(args.out, registry=reg, days_back=args.days_back, title=args.title, goatcounter=args.goatcounter)
+    written = build_calendar(args.out, registry=reg, days_back=args.days_back, title=args.title, goatcounter=args.goatcounter,
+                             base_url=args.base_url)
     c = written["counts"]
     con.out(
         con.style(con.sym("pass"), "green")
-        + f" wrote {', '.join(written['files'])} to {written['dir']} ({c['upcoming']} upcoming, {c['recent']} recently retired, {c['undated']} without a date)"
+        + f" wrote {', '.join(written['files'])}, {plural(written['model_pages'], 'model page')} and "
+        f"{plural(written['provider_pages'], 'provider page')} to {written['dir']} "
+        f"({c['upcoming']} upcoming, {c['recent']} recently retired, {c['undated']} without a date)"
     )
+    if not args.base_url:
+        con.out(con.style("  add --base-url https://<your site>/ for sitemap.xml, robots.txt, feed.xml and canonical links", "grey"))
     return EXIT_OK
 
 
@@ -761,4 +1190,6 @@ def register(sub: Any) -> None:
     p.add_argument("--registry", action="append", help="extra lifecycle registry JSON (overrides bundled entries)")
     p.add_argument("--goatcounter", metavar="CODE", help="count visits with GoatCounter, which sets no cookies: your site code "
                    "(CODE.goatcounter.com) or its https://.../count URL")
+    p.add_argument("--base-url", metavar="URL", help="the site's public https:// address, e.g. https://you.github.io/repo/: "
+                   "adds canonical links, sitemap.xml, robots.txt and an RSS feed (feed.xml)")
     p.set_defaults(func=cmd_calendar)
