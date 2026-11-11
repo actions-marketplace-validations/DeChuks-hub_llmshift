@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-07",
+  "updated": "2026-11-10",
   "about": "Model lifecycle registry for llmshift scan. Built from the providers' official deprecation pages on 2026-10-21. status is recomputed from dates at run time; notes may contain not_before:YYYY-MM-DD (no retirement before that date) and mark inferred rows.",
   "sources": {"openai": "https://developers.openai.com/api/docs/deprecations", "anthropic": "https://platform.claude.com/docs/en/about-claude/model-deprecations", "google": "https://ai.google.dev/gemini-api/docs/deprecations", "google-vertex": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/model-versions", "mistral": "https://docs.mistral.ai/models", "cohere": "https://docs.cohere.com/docs/deprecations", "xai": "https://docs.x.ai/docs/models", "deepseek": "https://api-docs.deepseek.com/quick_start/pricing"},
   "models": [
@@ -516,8 +516,8 @@
     {"id": "gpt-image-1-mini", "provider": "openai", "status": "deprecated", "deprecated": "2026-06-02", "retires": "2026-12-01", "replacement": "gpt-image-2.6-sunburst", "source": "https://developers.openai.com/api/docs/deprecations", "note": "alt: gpt-image-2.5-flare"},
     {"id": "gpt-image-1.5", "provider": "openai", "status": "deprecated", "deprecated": "2026-06-02", "retires": "2026-12-01", "replacement": "gpt-image-2.6-sunburst", "source": "https://developers.openai.com/api/docs/deprecations", "note": "alt: gpt-image-2.5-flare"},
     {"id": "gpt-image-1.5-2025-12-16", "provider": "openai", "status": "deprecated", "deprecated": "2026-06-02", "retires": "2026-12-01", "replacement": "gpt-image-2.6-sunburst", "source": "https://developers.openai.com/api/docs/deprecations#2026-06-02-gpt-image-model-deprecations", "note": "snapshot behind gpt-image-1.5 (inferred); alt: gpt-image-2.5-flare"},
-    {"id": "gpt-image-2", "provider": "openai", "status": "active", "source": "https://developers.openai.com/api/docs/models/gpt-image-2", "note": "snapshot gpt-image-2-2026-04-21"},
-    {"id": "gpt-image-2-2026-04-21", "provider": "openai", "status": "active", "source": "https://developers.openai.com/api/docs/models/gpt-image-2", "note": "snapshot"},
+    {"id": "gpt-image-2", "provider": "openai", "status": "deprecated", "retires": "2027-02-10", "replacement": "gpt-image-2.6-sunburst", "source": "https://developers.openai.com/api/docs/models/gpt-image-2", "note": "snapshot gpt-image-2-2026-04-21"},
+    {"id": "gpt-image-2-2026-04-21", "provider": "openai", "status": "deprecated", "retires": "2027-02-10", "replacement": "gpt-image-2.6-sunburst", "source": "https://developers.openai.com/api/docs/models/gpt-image-2", "note": "snapshot"},
     {"id": "gpt-image-2.5-flare", "provider": "openai", "status": "active", "source": "https://developers.openai.com/api/docs/models/gpt-image-2.5-flare", "note": "fast everyday image model; snapshot gpt-image-2.5-flare-2026-09-08"},
     {"id": "gpt-image-2.5-flare-2026-09-08", "provider": "openai", "status": "active", "source": "https://developers.openai.com/api/docs/models/gpt-image-2.5-flare", "note": "snapshot"},
     {"id": "gpt-image-2.5-sunburst", "provider": "openai", "status": "active", "source": "https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst", "note": "most capable image model; snapshot gpt-image-2.5-sunburst-2026-09-08"},

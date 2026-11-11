@@ -1,5 +1,5 @@
 {
-  "checked": "2026-11-07",
+  "checked": "2026-11-10",
   "pages": {
     "https://ai.google.dev/gemini-api/docs/changelog": {
       "sha256": "3eadf5d33c56db77f5ffe590479719b8ec7fcc2e11e75d17be7a58e153c81be0",
@@ -22,8 +22,8 @@
       "chars": 3107
     },
     "https://developers.openai.com/api/docs/deprecations": {
-      "sha256": "59faf431a21dcea765ba542a26c6c2f7d0f42b3665ca6b79f809924393387583",
-      "chars": 26601
+      "sha256": "ca79f9ba660adc4d174d0527c3cc26b2b014cc0ee11fe2ca414badff6fca88e4",
+      "chars": 26935
     },
     "https://developers.openai.com/api/docs/models": {
       "sha256": "5dda539a3972878eb3b9994343c8543f7435ad4edf27565a404c5a923bd4eb08",
@@ -290,8 +290,8 @@
       "chars": 12292
     },
     "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/model-versions": {
-      "sha256": "dbac0518fe7ab1aed65c1ee604dfd6b54a520c08b6f8597f8742831a5792d92f",
-      "chars": 6918
+      "sha256": "4e89f9779cac8394269995ecd0f71f12b71fc68ffe51c5420e17f0c084911dd4",
+      "chars": 7193
     },
     "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/deprecations": {
       "sha256": "61ca770ebf2ce03f66c0fa828f9eabddf52231eb734bacea981ddeff2a344eb4",
@@ -342,8 +342,8 @@
       "chars": 1225
     },
     "https://platform.claude.com/docs/en/about-claude/model-deprecations": {
-      "sha256": "682199aade74a18cdb54f68a58802d83a3eec8645f121cf0b9f71107fe76b0d8",
-      "chars": 9780
+      "sha256": "4b4cf5a6dba6cb450fc70fafb40f5290615b30650c561db2cbaa780aaeda2322",
+      "chars": 9903
     },
     "https://platform.claude.com/docs/en/models/haiku-4-5/overview": {
       "sha256": "c05cdd32defc5830395d009d31417ea57a0a612c9adcfa0db23afc4c692e5e6d",
