@@ -381,6 +381,7 @@ def watcher(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "STATE", tmp_path / "sources.json")
+    monkeypatch.setattr(module, "LINES", tmp_path / "reviewed-lines.json")
     return module
 
 
@@ -406,6 +407,109 @@ def test_watcher_text_and_change_detection(watcher, monkeypatch):
     assert second["changed"] == ["https://b.example/y"] and second["same"] == ["https://a.example/x"]
     urls = watcher.source_urls()
     assert urls and all("#" not in u and u.startswith("http") for u in urls)
+
+
+def test_watcher_reads_a_javascript_page_by_its_noscript_markdown(watcher):
+    # Google's Gemini API docs (AI Studio) are a JavaScript app: the text is Markdown in <noscript><pre>.
+    shell = (
+        '<!doctype html><html><head><title>Google AI Studio</title><script>var build = "{build}";</script></head>'
+        "<body><noscript><pre>{doc}</pre></noscript><ms-app></ms-app></body></html>"
+    )
+    doc = "# Gemini deprecations\n{% table %}\n* `gemini-3.1-flash-tts-preview`\n* November 17, 2026\n{% /table %}"
+    text = watcher.page_text(shell.format(build="W316", doc=doc))
+    assert "gemini-3.1-flash-tts-preview" in text and "November 17, 2026" in text
+    assert watcher.page_text(shell.format(build="X999", doc=doc)) == text  # a new build of the app is no change
+    assert watcher.page_text(shell.format(build="W316", doc=doc.replace("17", "24"))) != text  # a new date is
+    # A short <noscript> note on an ordinary page does not replace the page's text.
+    assert watcher.page_text("<main><p>gpt-4 retires 2026-10-23</p></main><noscript><pre>Turn on JavaScript</pre></noscript>") == "gpt-4 retires 2026-10-23"
+
+
+LIFECYCLE_HTML = (
+    "<html><head><script>var x = 'retired';</script></head><body><nav>Deprecations</nav><main>"
+    "<h2>2026-10-14: GPT-4 series model deprecations</h2>"
+    "<table><tr><th>Shutdown date</th><th>Model</th><th>Recommended replacement</th></tr>"
+    "<tr><td>Jan 14, 2027</td><td><div>gpt-4o</div><div>gpt-4o-2024-08-06</div></td><td>gpt-6-luna</td></tr></table>"
+    "<table><tr><th>Model</th><th>Price</th></tr><tr><td>gpt-6-luna</td><td>$1.00</td></tr></table>"
+    "<p>Older models are <b>retired</b> after their shutdown date.</p><p>Prices are per 1M tokens.</p>"
+    "</main><footer>Legacy site</footer></body></html>"
+)
+LIFECYCLE_MD = """# Gemini deprecations
+`gemini-2.5-pro` is deprecated and is no longer available to select in Google AI
+Studio. Effective December 1, 2026, requests route to `gemini-3.8-flash`.
+
+Pricing is per token.
+{% table %}
+* Model
+* Shutdown date
+---
+* `gemini-2.5-pro`
+* December 1, 2026
+{% /table %}
+"""
+
+
+def test_watcher_keeps_the_lines_about_deprecations_and_retirements(watcher):
+    # A row of a table whose header names a shutdown or retirement date is one line, its cells
+    # joined by " | ", whatever the cells hold; so is a paragraph that mentions a retirement.
+    assert watcher.lifecycle_lines(LIFECYCLE_HTML) == [
+        "2026-10-14: GPT-4 series model deprecations",
+        "Shutdown date | Model | Recommended replacement",
+        "Jan 14, 2027 | gpt-4o gpt-4o-2024-08-06 | gpt-6-luna",
+        "Older models are retired after their shutdown date.",
+    ]  # not the price table, the prices, the menu, the footer or the script
+    # Mistral's page puts the header in a table of its own and the rows in the next one.
+    split = (
+        "<main><table><thead><tr><th>Model</th><th>API</th><th>Deprecation</th><th>Retirement</th></tr></thead></table>"
+        "<table><tr><td>Mistral Large 3</td><td>mistral-large-2512</td><td>10/31/2026</td><td>4/30/2027</td></tr></table>"
+        "<table><tr><td>Mistral Small 4</td><td>$0.10</td></tr></table></main>"  # a later, unrelated table
+    )
+    assert watcher.lifecycle_lines(split) == ["Model | API | Deprecation | Retirement", "Mistral Large 3 | mistral-large-2512 | 10/31/2026 | 4/30/2027"]
+    # AI Studio's Markdown: wrapped lines of one paragraph are one line; Markdoc rows too.
+    page = f"<html><body><noscript><pre>{LIFECYCLE_MD}</pre></noscript><ms-app></ms-app></body></html>"
+    assert watcher.lifecycle_lines(page) == [
+        "Gemini deprecations",
+        "`gemini-2.5-pro` is deprecated and is no longer available to select in Google AI Studio. "
+        "Effective December 1, 2026, requests route to `gemini-3.8-flash`.",
+        "Model | Shutdown date",
+        "`gemini-2.5-pro` | December 1, 2026",
+    ]
+
+
+def test_watcher_issue_shows_the_lifecycle_lines_that_changed(watcher, tmp_path, monkeypatch):
+    monkeypatch.setattr(watcher, "LINES", tmp_path / "reviewed-lines.json")
+    pages = {"https://a.example/deprecations": LIFECYCLE_HTML, "https://b.example/models": "<main><p>gpt-6-luna is our newest model.</p></main>"}
+    monkeypatch.setattr(watcher, "fetch", lambda url, **kw: pages[url])
+    first = watcher.check(list(pages), {})
+    watcher.save_state(first, {})
+    reviewed = json.loads(watcher.LINES.read_text(encoding="utf-8"))
+    assert reviewed["https://a.example/deprecations"][2] == "Jan 14, 2027 | gpt-4o gpt-4o-2024-08-06 | gpt-6-luna"
+    pages["https://a.example/deprecations"] = LIFECYCLE_HTML.replace("Jan 14, 2027", "Feb 10, 2027").replace("per 1M", "per 1K")
+    pages["https://b.example/models"] = "<main><p>gpt-6-luna is our newest, fastest model.</p></main>"  # an edit, no lifecycle line
+    pages["https://c.example/new"] = "<main><p>gpt-5 retires on 2026-12-11.</p></main>"  # never recorded
+    second = watcher.check(list(pages), {"pages": first["current"]})
+    body = watcher.issue_body(second)
+    assert "+ Feb 10, 2027 | gpt-4o gpt-4o-2024-08-06 | gpt-6-luna" in body
+    assert "- Jan 14, 2027 | gpt-4o gpt-4o-2024-08-06 | gpt-6-luna" in body
+    assert "per 1K" not in body  # only lines about deprecations and retirements
+    b_part = body.split("https://b.example/models", 1)[1].split("https://c.example/new", 1)[0]
+    assert "No line about a deprecation, retirement or shutdown changed" in b_part
+    c_part = body.split("https://c.example/new", 1)[1]
+    assert "gpt-5 retires on 2026-12-11." in c_part and "not recorded before" in c_part
+    assert body.index("https://a.example/deprecations") < body.index("https://b.example/models")  # pages with changed lines first
+    # Same pages, different lines: the issue's marker changes, so the issue is updated.
+    third = watcher.check(list(pages), {"pages": first["current"]})
+    assert watcher.issue_body(third) == body
+    pages["https://a.example/deprecations"] = pages["https://a.example/deprecations"].replace("Feb 10, 2027", "Mar 3, 2027")
+    assert watcher.issue_body(watcher.check(list(pages), {"pages": first["current"]})).split("registry-watch:")[1] != body.split("registry-watch:")[1]
+
+
+def test_watcher_issue_body_stays_within_githubs_limit(watcher, tmp_path, monkeypatch):
+    monkeypatch.setattr(watcher, "LINES", tmp_path / "reviewed-lines.json")
+    many = "<main>" + "".join(f"<p>model-{i} retires on day {i} of a very long schedule {'x' * 300}</p>" for i in range(400)) + "</main>"
+    urls = [f"https://p{i}.example/x" for i in range(60)]
+    monkeypatch.setattr(watcher, "fetch", lambda url, **kw: many)
+    body = watcher.issue_body(watcher.check(urls, {"pages": {u: {"sha256": "old"} for u in urls}}))
+    assert len(body) < 65536 and "more" in body and body.rstrip().endswith("-->")
 
 
 def test_watcher_main_exit_codes(watcher, monkeypatch, capsys):

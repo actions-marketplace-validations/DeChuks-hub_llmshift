@@ -9,7 +9,7 @@ description = "Switch AI models without breaking your product: find model calls,
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Chukwu Nzubechi", email = "nzubechukwu00176@gmail.com" }]
+authors = [{ name = "Chukwu Nzubechi" }]
 keywords = ["llm", "evals", "openai", "anthropic", "gemini", "testing", "regression", "prompt", "migration", "model-deprecation"]
 classifiers = [
     "Development Status :: 4 - Beta",

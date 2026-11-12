@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **The lifecycle data was checked against every provider page that changed (12 November 2026).** It matches the pages of OpenAI, Anthropic, Google (Gemini API and Vertex AI), Mistral, xAI, DeepSeek and Cohere. What changed:
+  - Gemini 2.5 Pro and Gemini 2.5 Flash are deprecated. From 1 December 2026, the shutdown date Google lists, every request to them routes to `gemini-3.8-flash` and `gemini-3.5-flash-lite`, billed at those models' rates.
+  - Gemini Omni 1.1 Flash routes to Omni 1.2 Flash from 3 December 2026. Gemini Embedding 2 Preview has routed to Embedding 2 since 6 November.
+  - Mistral deprecated Mistral Large 3 (`mistral-large-2512`), Mistral Medium 3.5 and three Voxtral models on 31 October. They retire on 30 April 2027.
+  - Claude Sonnet 4.5 on Vertex AI shuts down on 30 November 2026, the same day as on Anthropic's API.
+  - New models: Gemini 4 Carbon, Gemini Omni 1.2 Flash, Gemini Decision 1, Claude Fable 5.2 and Mythos 5.2, GPT-6.1 Terra, GPT-6-Cyber and GPT-Image-2.6.
+- The daily data update reads Google's Gemini API pages again. In November they moved to AI Studio, a JavaScript app that carries each page as Markdown, and since then the update had skipped Google without saying so.
+- The issue the data watch opens now shows, for each changed provider page, the lines about deprecations, retirements and shutdowns that changed since the last review, so a review takes minutes.
+- The package metadata names the author without an e-mail address.
+- The MCP Registry entry lists the server's ten tools, each with the first sentence of its description, so directories that read the registry stop showing "tools not listed". CI now validates `server.json` on every push, as the release does.
+
 ## 0.1.7 (2026-10-29)
 
 - `llmshift import openai-evals --api --save-raw` also keeps every API response exactly as read: the evals with their graders, every run with its data source and settings, the output items and the data files. They go to a dated file next to the tests (`openai-evals-raw-2026-10-29.json`), or to the file you name. Before, the import turned this data into tests and kept nothing else, so once the API shuts down on 30 November nothing would show what the original graders did. The file holds response bodies only, never the API key, and is never replaced without `--force`, which is checked before any API call. Suggested by Shuttlewright on DEV.

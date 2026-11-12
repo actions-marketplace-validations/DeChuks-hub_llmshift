@@ -139,7 +139,8 @@ def test_package_metadata_is_launch_ready():
     meta = _toml(ROOT / "pyproject.toml")["project"]
     assert meta["name"] == "llmshift" and meta["version"] == llmshift.__version__
     assert meta["scripts"] == {"llmshift": "llmshift.cli:entry"}
-    assert meta["authors"] == [{"name": "Chukwu Nzubechi", "email": "nzubechukwu00176@gmail.com"}]
+    assert meta["authors"] == [{"name": "Chukwu Nzubechi"}]  # PyPI shows metadata to everyone: a name, no e-mail address
+    assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert "Chukwu Nzubechi" in (ROOT / "LICENSE").read_text(encoding="utf-8")
     assert re.search(r'^author:\s*"Chukwu Nzubechi"', (ROOT / "action.yml").read_text(encoding="utf-8"), re.M)
     assert (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").count(f"## {llmshift.__version__} ") == 1
@@ -176,6 +177,19 @@ def test_the_mcp_registry_entry_matches_this_release():
     assert server["name"] == "io.github.DeChuks-hub/llmshift"  # the namespace GitHub sign-in grants this repository's owner
 
 
+def test_the_mcp_registry_entry_lists_the_servers_tools():
+    """Directories that read the MCP Registry showed "tools not listed": server.json has no field
+    for tools. The registry keeps up to 4 KB of publisher-provided metadata, so the entry lists
+    each tool's name and the first sentence of its description, taken from the server itself."""
+    from llmshift import mcp
+
+    server = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+    provided = server["_meta"]["io.modelcontextprotocol.registry/publisher-provided"]
+    expected = [{"name": t.name, "description": re.split(r"(?<=\.)\s+(?=[A-Z`])", t.description.strip(), maxsplit=1)[0]} for t in mcp.TOOLS.values()]
+    assert provided["tools"] == expected  # a tool added, renamed or reworded must be listed the same way
+    assert len(json.dumps(provided, ensure_ascii=False).encode("utf-8")) <= 4096  # larger and the registry refuses the release
+
+
 # What a workflow can pass to and read from the action: `@v0` moves to every 0.x release,
 # so a name removed or renamed here would break workflows that never chose to upgrade.
 V0_INPUTS = {"command", "args", "python-version", "version", "working-directory"}
@@ -198,6 +212,23 @@ def test_the_action_meets_the_marketplace_rules():
     action = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
     assert action["name"] and len(action["description"]) < 125
     assert action["branding"]["icon"] and action["branding"]["color"]
+
+
+def test_python_39_is_tested_on_a_linux_that_still_ships_it():
+    """setup-python has no Python 3.9 for Ubuntu 26.04, which ubuntu-latest became in October 2026
+    (the job fails before any test runs). The 3.9 jobs run on ubuntu-24.04, so every push and every
+    release still tests the oldest supported Python on Linux."""
+    from llmshift._vendor import yaml
+
+    for name in ("ci.yml", "release.yml"):
+        path = ROOT / ".github" / "workflows" / name
+        if not path.exists():
+            pytest.skip("the workflows are not in the source archive")
+        matrix = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["test"]["strategy"]["matrix"]
+        jobs = {(os_name, py) for os_name in matrix["os"] for py in matrix["python-version"]}
+        jobs -= {(e["os"], e["python-version"]) for e in matrix.get("exclude", [])}
+        jobs |= {(i["os"], i["python-version"]) for i in matrix.get("include", [])}
+        assert ("ubuntu-latest", "3.9") not in jobs and ("ubuntu-24.04", "3.9") in jobs, name
 
 
 # The first major release of each of GitHub's own actions that runs on Node.js 24 (`runs.using`

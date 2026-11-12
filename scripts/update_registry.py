@@ -6,7 +6,8 @@
     python scripts/update_registry.py --pages DIR     # read saved pages (DIR/<provider>.html)
 
 The OpenAI, Anthropic, Gemini API and Vertex AI pages publish their schedules as
-tables. Each row's model ids, shutdown date and replacement are merged conservatively:
+tables (HTML tables, or Markdoc tables in the Markdown that Google's AI Studio docs carry
+for readers without JavaScript). Each row's model ids, shutdown date and replacement are merged conservatively:
 nothing is ever removed, models that already retired keep their record, an entry changes
 only where a page states a concrete date or replacement that differs, and a model is
 added only when its shutdown is still ahead. A page whose tables can no longer be read
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import functools
 import hashlib
 import importlib.util
 import json
@@ -44,6 +46,7 @@ SOURCES = [
 MIN_ROWS = 5  # fewer readable rows than this: the page layout changed; leave it to a person
 MAX_CHANGES = 40  # more changes than this in one run: write nothing, ask for a review
 ID_RE = re.compile(r"\b[a-z][a-z0-9]*(?:[-._][a-z0-9]+)+\b")
+_PARENS_RE = re.compile(r"\([^)]*\)")
 MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
 _NOT_A_DATE = (
     "not sooner", "no sooner", "or later", "no shutdown", "no retirement", "not announced", "n/a", "earliest",
@@ -115,12 +118,25 @@ def parse_date(text: str) -> str | None:
 
 def model_ids(cell: str) -> list[str]:
     """Model ids in a table cell; ids in parentheses win ("GPT-4o (gpt-4o-2024-08-06, ...)").
-    Real ids carry a version number, which keeps out words like "fine-tuning"."""
+    Real ids carry a version number, which keeps out words like "fine-tuning"; an id written
+    as code (`gemini-omni-flash-preview`) counts without one."""
+
+    def is_id(word: str) -> bool:
+        return any(ch.isdigit() for ch in word) or f"`{word}`" in cell
+
     inner = " ".join(re.findall(r"\(([^)]*)\)", cell))
-    found = [i for i in ID_RE.findall(inner) if any(ch.isdigit() for ch in i)]
+    found = [i for i in ID_RE.findall(inner) if is_id(i)]
     if not found:
-        found = [i for i in ID_RE.findall(cell) if any(ch.isdigit() for ch in i)]
+        found = [i for i in ID_RE.findall(cell) if is_id(i)]
     return list(dict.fromkeys(found))
+
+
+def replacement_id(cell: str) -> str | None:
+    """The model a replacement cell names. Ids outside parentheses come first, because a note
+    in parentheses can name the retiring model itself ("gemini-3.8-flash (gemini-3.7-flash
+    is no longer available ...)"); then ids inside them ("GPT-5.6 Sol (gpt-5.6-sol)")."""
+    found = model_ids(_PARENS_RE.sub(" ", cell)) or model_ids(cell)
+    return found[0] if found else None
 
 
 def _column(header: list[str], words: tuple, exclude: tuple = ()) -> int | None:
@@ -145,7 +161,8 @@ def parse_page(html: str, provider: str, url: str, model_words: tuple, date_word
     parser = _Tables()
     parser.feed(html)
     rows: list[Row] = []
-    for heading, table in parser.tables:
+    watcher = _watcher()
+    for heading, table in parser.tables + watcher.markdoc_tables(watcher.noscript_document(html) or html):
         if len(table) < 2:
             continue
         header = table[0]
@@ -158,10 +175,10 @@ def parse_page(html: str, provider: str, url: str, model_words: tuple, date_word
         for cells in table[1:]:
             if len(cells) <= max(mi, di):
                 continue  # section rows ("Preview models") span the table
-            repl = model_ids(cells[ri])[:1] if ri is not None and ri < len(cells) else []
+            repl = replacement_id(cells[ri]) if ri is not None and ri < len(cells) else None
             deprecated = parse_date(cells[dep_i]) if dep_i is not None and dep_i < len(cells) else announced
             for mid in model_ids(cells[mi]):
-                rows.append(Row(provider, mid, parse_date(cells[di]), repl[0] if repl else None, deprecated, url))
+                rows.append(Row(provider, mid, parse_date(cells[di]), repl, deprecated, url))
     return rows
 
 
@@ -230,6 +247,7 @@ def dump(data: dict) -> bytes:
     return ("\n".join(lines) + '\n  "models": [\n' + ",\n".join(models) + "\n  ]\n}\n").encode("utf-8")
 
 
+@functools.lru_cache(maxsize=None)
 def _watcher():
     spec = importlib.util.spec_from_file_location("check_registry_sources", ROOT / "scripts" / "check_registry_sources.py")
     module = importlib.util.module_from_spec(spec)
@@ -251,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     before = json.loads(json.dumps(data))
     rows: list[Row] = []
     read: dict[str, str] = {}  # url -> page text, for pages whose tables were read
+    lines: dict[str, list[str]] = {}  # url -> its lines about deprecations and retirements, recorded with it
     for provider, url, model_words, date_words, replacement_words in SOURCES:
         try:  # a page saved by a browser may not be UTF-8: read what can be read
             html = (args.pages / f"{provider}.html").read_bytes().decode("utf-8", "replace") if args.pages else watcher.fetch(url)
@@ -264,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {provider}: {len(found)} rows from {url}")
         rows.extend(found)
         read[url] = watcher.page_text(html)
+        lines[url] = watcher.lifecycle_lines(html)
     review: list[str] = []
     changes = merge(data, rows, today, review)
     for line in review:
@@ -296,6 +316,7 @@ def main(argv: list[str] | None = None) -> int:
         for url, text in read.items():  # these pages are now reflected in the data
             pages[url] = {"sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "chars": len(text)}
         STATE.write_bytes((json.dumps({"checked": today, "pages": dict(sorted(pages.items()))}, indent=2) + "\n").encode("utf-8"))
+        watcher.record_lines(lines)
         shown = MODELS.relative_to(ROOT) if MODELS.is_relative_to(ROOT) else MODELS
         print(f"Wrote {shown} ({summary.get('after', len(data['models']))} models).")
     return 4 if review else 0  # 4: written, but some dates wait for a person (the workflow publishes, then fails)

@@ -45,5 +45,51 @@
         }
       ]
     }
-  ]
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "tools": [
+        {
+          "name": "llmshift_scan",
+          "description": "Find every AI model ID the code in this project calls (Python, JS/TS, Go, Java, configs, .env, notebooks) and report each one's lifecycle: retired, retiring (date and days left), deprecated or active, the recommended replacement, and every file:line where it is used."
+        },
+        {
+          "name": "llmshift_models",
+          "description": "Look up retirement dates and replacements in llmshift's model lifecycle registry (OpenAI, Anthropic, Google, Mistral, Cohere, xAI, DeepSeek)."
+        },
+        {
+          "name": "llmshift_snapshot",
+          "description": "Turn LLM usage logs (JSONL, JSON or CSV, optionally .gz: OpenAI chat/responses/batch, Anthropic, Gemini, Helicone, Langfuse/LangSmith exports, llmshift.record logs) into a regression test set: real requests, the current model's answers, and checks inferred from them."
+        },
+        {
+          "name": "llmshift_compare",
+          "description": "Run the project's test set (made by llmshift_snapshot) on a model and report exactly what changed versus the current model's recorded answers: broken formats (invalid JSON, code fences), wrong or missing facts and numbers, tone and length changes, tool-call differences and refusals."
+        },
+        {
+          "name": "llmshift_fix",
+          "description": "Search for system-prompt changes that make a new model reproduce the current model's behaviour on the test set, validated by re-running the tests on the new model."
+        },
+        {
+          "name": "llmshift_pick",
+          "description": "Find the cheapest model that still passes the project's test set: runs the tests on several candidate models at once and reports each one's pass rate (with a 95% range), cost per 1,000 requests and latency, then recommends the cheapest that meets the quality bar, with the saving against today's model (per month when `volume` is given)."
+        },
+        {
+          "name": "llmshift_safety",
+          "description": "Check whether a new model is riskier than the current one: refusals on the project's real requests, prompt-injection probes (hidden instructions in messages, quoted documents or tool results) and leaks of confidential data from the system prompt, all built from the project's own test cases and run on both models."
+        },
+        {
+          "name": "llmshift_check",
+          "description": "Test edited prompts: finds the system prompts that changed since a git base (default origin/main) and runs only their test cases, with the edited text, on the model in production."
+        },
+        {
+          "name": "llmshift_upgrade",
+          "description": "Plan (and optionally apply) the code changes that move this project off a retiring model: swaps the model ID exactly where llmshift_scan finds it, renames max_tokens to max_completion_tokens where OpenAI's newer models need it, and lists settings to check by hand."
+        },
+        {
+          "name": "llmshift_doctor",
+          "description": "Check the llmshift setup: version, the config file in use, which provider credential environment variables are set (names only, never values), whether the test set exists, and whether the configured baseline, candidate and judge models resolve."
+        }
+      ]
+    }
+  }
 }

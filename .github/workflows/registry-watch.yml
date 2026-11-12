@@ -8,6 +8,8 @@
 # 2. scripts/check_registry_sources.py checks every page the data was built from and
 #    opens (or updates) an issue for changes the update could not read, and closes it
 #    once every page matches the reviewed state. Unreachable pages do not fail the job.
+#    For each page, the issue shows the lines about deprecations, retirements and
+#    shutdowns that changed since the review (scripts/reviewed-lines.json).
 # After reviewing the pages an issue lists: Actions -> registry-watch -> Run workflow
 # with "reviewed" ticked records them as the runner sees them (some pages differ by
 # region or time of day), and the issue closes.
@@ -64,7 +66,7 @@ jobs:
           python -m pytest -q
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/llmshift/data/models.json src/llmshift/data/sources.json
+          git add src/llmshift/data/models.json src/llmshift/data/sources.json scripts/reviewed-lines.json
           git commit -q -F "$RUNNER_TEMP/update.md"
           git push
           # A push made with GITHUB_TOKEN starts no workflow: rebuild the calendar now, not tomorrow.
@@ -76,7 +78,7 @@ jobs:
           python scripts/check_registry_sources.py --update
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/llmshift/data/sources.json
+          git add src/llmshift/data/sources.json scripts/reviewed-lines.json
           if ! git diff --cached --quiet; then
             git commit -q -m "Record the reviewed lifecycle source pages"
             git push
