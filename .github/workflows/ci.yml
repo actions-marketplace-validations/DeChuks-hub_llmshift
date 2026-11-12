@@ -21,7 +21,7 @@ jobs:
           - os: ubuntu-24.04
             python-version: "3.9"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false  # nothing here pushes: the token is not left in .git/config
       - uses: actions/setup-python@v7
@@ -40,7 +40,7 @@ jobs:
   action:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false  # nothing here pushes: the token is not left in .git/config
       - uses: actions/setup-python@v7
@@ -57,7 +57,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false  # nothing here pushes: the token is not left in .git/config
       - uses: actions/setup-python@v7
