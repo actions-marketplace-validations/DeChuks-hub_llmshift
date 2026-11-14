@@ -1,13 +1,13 @@
 {
-  "checked": "2026-11-12",
+  "checked": "2026-11-13",
   "pages": {
     "https://ai.google.dev/gemini-api/docs/changelog": {
       "sha256": "5750cf38721c1c2757d00b593c491bea3331ae0dc4dd4dce2ea65878f0e66c74",
       "chars": 63857
     },
     "https://ai.google.dev/gemini-api/docs/deprecations": {
-      "sha256": "a1721e20bd48d89c915c2fab84838503fbd733c1d8a0cf90fea1862a55065270",
-      "chars": 16747
+      "sha256": "95bdd071138ede628b512527497fd0e16c5e6aa895c7dd3fcd974bf02d3a4aff",
+      "chars": 16824
     },
     "https://ai.google.dev/gemini-api/docs/models": {
       "sha256": "b9c2dbc89f02c1f916c289671e15a41eb964bfdffbbc24bbd38f7b7e44fd3b8a",
@@ -22,8 +22,8 @@
       "chars": 17897
     },
     "https://developers.openai.com/api/docs/deprecations": {
-      "sha256": "ca79f9ba660adc4d174d0527c3cc26b2b014cc0ee11fe2ca414badff6fca88e4",
-      "chars": 26935
+      "sha256": "43248a6c722d6089912592dbc6b4e06160670106a1e39d2eaaecd19d92d8e572",
+      "chars": 19108
     },
     "https://developers.openai.com/api/docs/models": {
       "sha256": "7d3d5162d44062de0bc337a3cfc45ceb0fc5a931d2c9434ab4506d2286a444e1",
@@ -306,8 +306,8 @@
       "chars": 14404
     },
     "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/model-versions": {
-      "sha256": "449fe6340d7ae0a85bc59bea2c7f689ec3e2baf8d84cd11611df66aec1153c90",
-      "chars": 7336
+      "sha256": "d7f0b3ac615d996ff369bb98d836687d903645aea3acbc4c0977de7821643f4f",
+      "chars": 7401
     },
     "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/deprecations": {
       "sha256": "81b78d18d006c2a5b44c76dc027f1b5cd71f4ac191c820890e27b25fa14ebff9",
