@@ -22,7 +22,7 @@ jobs:
       matrix:
         language: [python, actions]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false  # nothing here pushes: the token is not left in .git/config
       - uses: github/codeql-action/init@v4
